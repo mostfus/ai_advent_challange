@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DeepSeek Chat</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --border: #dcdce0;
+    --text: #1c1c1f;
+    --text-muted: #6b6b76;
+    --accent: #2f6fed;
+    --accent-text: #ffffff;
+    --bubble-user: #2f6fed;
+    --bubble-user-text: #ffffff;
+    --bubble-assistant: #ececef;
+    --bubble-assistant-text: #1c1c1f;
+    --bubble-error: #fdecea;
+    --bubble-error-text: #9c2a1e;
+    --input-bg: #ffffff;
+    --json-key: #2f6fed;
+    --json-string: #1f7a4d;
+    --json-number: #a15c00;
+    --json-boolean: #7c4fd1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181c;
+      --panel-bg: #1f2024;
+      --border: #313238;
+      --text: #eceef1;
+      --text-muted: #9a9aa4;
+      --accent: #5b8bf0;
+      --accent-text: #0c0d10;
+      --bubble-user: #5b8bf0;
+      --bubble-user-text: #0c0d10;
+      --bubble-assistant: #2b2c32;
+      --bubble-assistant-text: #eceef1;
+      --bubble-error: #3a2220;
+      --bubble-error-text: #ff8a80;
+      --input-bg: #26272c;
+      --json-key: #5b8bf0;
+      --json-string: #5fd08a;
+      --json-number: #e0a458;
+      --json-boolean: #b39ddb;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 15px;
+  }
+
+  .app {
+    display: flex;
+    height: 100vh;
+  }
+
+  /* Below this, side-by-side stops making sense - stack instead. Always in
+     normal document flow (never fixed/hidden), so the settings panel can
+     never end up invisible off-screen. */
+  @media (max-width: 760px) {
+    .app { flex-direction: column; height: auto; min-height: 100vh; }
+    #settings-panel { width: 100%; max-height: 45vh; border-right: none; border-bottom: 1px solid var(--border); }
+    #chat-col { height: 70vh; }
+    #chat-inner { width: 100%; max-width: 100%; }
+    #debug-panel { width: 100%; max-height: 55vh; border-left: none; border-top: 1px solid var(--border); }
+  }
+
+  /* ---- Settings panel ---- */
+  #settings-panel {
+    width: 300px;
+    flex-shrink: 0;
+    background: var(--panel-bg);
+    border-right: 1px solid var(--border);
+    padding: 20px 18px;
+    overflow-y: auto;
+  }
+
+  #settings-panel h1 {
+    font-size: 16px;
+    margin: 0 0 18px;
+  }
+
+  .field {
+    margin-bottom: 18px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  select, input[type="text"], textarea {
+    width: 100%;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
+  }
+
+  select:focus, input[type="text"]:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  .custom-prompt {
+    margin-top: 8px;
+  }
+
+  .custom-prompt textarea {
+    resize: vertical;
+    min-height: 64px;
+  }
+
+  .field.divider {
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: auto;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  /* ---- Chat column ---- */
+  #chat-col {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    min-width: 0;
+  }
+
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-bg);
+  }
+
+  #topbar h2 {
+    font-size: 15px;
+    margin: 0;
+    font-weight: 600;
+  }
+
+  /* Centered chat column: roughly a third of the viewport width, with sane
+     bounds so it stays readable on both narrow and very wide windows. */
+  #chat-inner {
+    width: clamp(420px, 34vw, 760px);
+    max-width: 100%;
+    margin: 0 auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  #transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .empty-state {
+    margin: auto;
+    text-align: center;
+    color: var(--text-muted);
+    max-width: 360px;
+  }
+
+  .msg-row {
+    display: flex;
+  }
+
+  .msg-row.user { justify-content: flex-end; }
+  .msg-row.assistant { justify-content: flex-start; }
+
+  .bubble {
+    max-width: 70%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.45;
+  }
+
+  .msg-row.user .bubble {
+    background: var(--bubble-user);
+    color: var(--bubble-user-text);
+    border-bottom-right-radius: 4px;
+  }
+
+  .msg-row.assistant .bubble {
+    background: var(--bubble-assistant);
+    color: var(--bubble-assistant-text);
+    border-bottom-left-radius: 4px;
+  }
+
+  .msg-row.assistant .bubble.error {
+    background: var(--bubble-error);
+    color: var(--bubble-error-text);
+  }
+
+  .msg-row.assistant .bubble.pending {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  #composer {
+    border-top: 1px solid var(--border);
+    background: var(--panel-bg);
+    padding: 14px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  #prompt-input {
+    flex: 1;
+    resize: none;
+    max-height: 220px;
+    overflow-y: auto;
+    line-height: 1.4;
+  }
+
+  #send-btn {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  #send-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  #composer-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 20px 10px;
+    text-align: right;
+  }
+
+  /* ---- Debug panel ---- */
+  #debug-panel {
+    display: none;
+    flex: 1;
+    min-width: 320px;
+    flex-direction: column;
+    background: var(--panel-bg);
+    border-left: 1px solid var(--border);
+    min-height: 0;
+  }
+
+  .app.show-debug #debug-panel { display: flex; }
+
+  #debug-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #debug-header h1 {
+    font-size: 16px;
+    margin: 0;
+  }
+
+  .text-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .text-btn:hover { background: var(--bubble-assistant); }
+
+  #debug-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .debug-entry {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+  }
+
+  .debug-entry-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    line-height: 1.4;
+  }
+
+  .debug-block {
+    margin-top: 10px;
+  }
+
+  .debug-block:first-of-type {
+    margin-top: 0;
+  }
+
+  .debug-block summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 2px 0;
+    user-select: none;
+    list-style: none;
+  }
+
+  /* display:flex drops the browser's built-in disclosure triangle (it only
+     renders for the default display:list-item), so draw our own - a small
+     arrow that rotates from closed (▸) to open (▾). */
+  .debug-block summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .debug-block summary::before {
+    content: "";
+    flex-shrink: 0;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid var(--text-muted);
+    transition: transform 0.15s ease;
+  }
+
+  .debug-block[open] > summary::before {
+    transform: rotate(90deg);
+  }
+
+  .token-badge {
+    margin-left: auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--json-number);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+  }
+
+  .json-wrap {
+    position: relative;
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    border-radius: 6px;
+    padding: 3px 8px;
+    cursor: pointer;
+  }
+
+  .copy-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
+  .json-view {
+    margin: 6px 0 0;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .json-key { color: var(--json-key); }
+  .json-string { color: var(--json-string); }
+  .json-number { color: var(--json-number); }
+  .json-boolean, .json-null { color: var(--json-boolean); }
+
+  .debug-error {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--bubble-error);
+    color: var(--bubble-error-text);
+    border-radius: 8px;
+    font-size: 12.5px;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside id="settings-panel">
+    <h1>Settings</h1>
+
+    <div class="field">
+      <label for="model-select">Model</label>
+      <select id="model-select"></select>
+    </div>
+
+    <div class="field">
+      <label for="system-prompt-select">System prompt</label>
+      <select id="system-prompt-select"></select>
+      <div class="custom-prompt" id="custom-prompt-wrap" style="display:none">
+        <textarea id="custom-prompt-input" placeholder="Enter a custom system prompt..."></textarea>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="stop-input">Stop sequences</label>
+      <input type="text" id="stop-input" placeholder="comma, separated, values" />
+      <div class="hint">Up to 16, comma-separated. Leave empty to clear.</div>
+    </div>
+
+    <div class="field">
+      <label for="response-format-select">Response format</label>
+      <select id="response-format-select"></select>
+      <div class="hint" id="json-format-hint" style="display:none">
+        DeepSeek requires the message itself to explicitly ask for JSON (mention "json" and describe the structure), otherwise it may generate until the token limit is hit.
+      </div>
+    </div>
+
+    <div class="field divider">
+      <label class="checkbox-label">
+        <input type="checkbox" id="debug-toggle" />
+        Show debug panel
+      </label>
+      <div class="hint">Shows the exact request and response JSON for each message, with token usage and timing.</div>
+    </div>
+  </aside>
+
+  <div id="chat-col">
+    <div id="topbar">
+      <h2>DeepSeek Chat</h2>
+    </div>
+
+    <div id="chat-inner">
+      <div id="transcript">
+        <div class="empty-state" id="empty-state">
+          Send a message to start. Paste or type text of any length — Enter sends, Shift+Enter adds a line break.
+        </div>
+      </div>
+
+      <div id="composer">
+        <textarea id="prompt-input" rows="1" placeholder="Type a message..."></textarea>
+        <button id="send-btn">Send</button>
+      </div>
+      <div id="composer-hint">Enter to send · Shift+Enter for a new line</div>
+    </div>
+  </div>
+
+  <aside id="debug-panel">
+    <div id="debug-header">
+      <h1>Debug</h1>
+      <button id="debug-clear-btn" class="text-btn" type="button">Clear log</button>
+    </div>
+    <div id="debug-log">
+      <div class="empty-state" id="debug-empty-state">
+        The request and response JSON for each message you send will appear here.
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const els = {
+    modelSelect: document.getElementById("model-select"),
+    systemPromptSelect: document.getElementById("system-prompt-select"),
+    customPromptWrap: document.getElementById("custom-prompt-wrap"),
+    customPromptInput: document.getElementById("custom-prompt-input"),
+    stopInput: document.getElementById("stop-input"),
+    responseFormatSelect: document.getElementById("response-format-select"),
+    jsonFormatHint: document.getElementById("json-format-hint"),
+    transcript: document.getElementById("transcript"),
+    emptyState: document.getElementById("empty-state"),
+    promptInput: document.getElementById("prompt-input"),
+    sendBtn: document.getElementById("send-btn"),
+    app: document.querySelector(".app"),
+    debugToggle: document.getElementById("debug-toggle"),
+    debugLog: document.getElementById("debug-log"),
+    debugEmptyState: document.getElementById("debug-empty-state"),
+    debugClearBtn: document.getElementById("debug-clear-btn"),
+  };
+
+  let systemPrompts = [];
+  const CUSTOM_VALUE = "__custom__";
+
+  async function loadConfig() {
+    const res = await fetch("/api/config");
+    const cfg = await res.json();
+
+    els.modelSelect.innerHTML = "";
+    for (const model of cfg.models) {
+      const opt = new Option(model, model, false, model === cfg.state.model);
+      els.modelSelect.add(opt);
+    }
+
+    systemPrompts = cfg.system_prompts;
+    els.systemPromptSelect.innerHTML = "";
+    for (const sp of systemPrompts) {
+      els.systemPromptSelect.add(new Option(sp.name, sp.name));
+    }
+    els.systemPromptSelect.add(new Option("Custom…", CUSTOM_VALUE));
+
+    const matching = systemPrompts.find((sp) => sp.prompt === cfg.state.system_prompt);
+    if (matching) {
+      els.systemPromptSelect.value = matching.name;
+      els.customPromptWrap.style.display = "none";
+    } else {
+      els.systemPromptSelect.value = CUSTOM_VALUE;
+      els.customPromptInput.value = cfg.state.system_prompt;
+      els.customPromptWrap.style.display = "block";
+    }
+
+    els.responseFormatSelect.innerHTML = "";
+    for (const fmt of cfg.response_formats) {
+      els.responseFormatSelect.add(new Option(fmt, fmt, false, fmt === cfg.state.response_format));
+    }
+    els.jsonFormatHint.style.display = cfg.state.response_format === "json_object" ? "block" : "none";
+
+    els.stopInput.value = (cfg.state.stop || []).join(", ");
+  }
+
+  async function postSettings(patch) {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert("Settings error: " + (body.detail || res.statusText));
+    }
+  }
+
+  els.modelSelect.addEventListener("change", () => {
+    postSettings({ model: els.modelSelect.value });
+  });
+
+  els.systemPromptSelect.addEventListener("change", () => {
+    if (els.systemPromptSelect.value === CUSTOM_VALUE) {
+      els.customPromptWrap.style.display = "block";
+      els.customPromptInput.focus();
+      if (els.customPromptInput.value.trim()) {
+        postSettings({ system_prompt: els.customPromptInput.value });
+      }
+    } else {
+      els.customPromptWrap.style.display = "none";
+      const sp = systemPrompts.find((p) => p.name === els.systemPromptSelect.value);
+      if (sp) postSettings({ system_prompt: sp.prompt });
+    }
+  });
+
+  els.customPromptInput.addEventListener("blur", () => {
+    if (els.systemPromptSelect.value === CUSTOM_VALUE && els.customPromptInput.value.trim()) {
+      postSettings({ system_prompt: els.customPromptInput.value });
+    }
+  });
+
+  els.stopInput.addEventListener("blur", () => {
+    const sequences = els.stopInput.value.split(",").map((s) => s.trim()).filter(Boolean);
+    postSettings({ stop: sequences });
+  });
+
+  els.responseFormatSelect.addEventListener("change", () => {
+    const value = els.responseFormatSelect.value;
+    els.jsonFormatHint.style.display = value === "json_object" ? "block" : "none";
+    postSettings({ response_format: value });
+  });
+
+  // ---- Debug panel ----
+  const DEBUG_VISIBLE_KEY = "deepseek-chat-show-debug";
+
+  function setDebugVisible(visible) {
+    els.app.classList.toggle("show-debug", visible);
+    els.debugToggle.checked = visible;
+    localStorage.setItem(DEBUG_VISIBLE_KEY, visible ? "1" : "0");
+  }
+
+  els.debugToggle.addEventListener("change", () => setDebugVisible(els.debugToggle.checked));
+  setDebugVisible(localStorage.getItem(DEBUG_VISIBLE_KEY) === "1");
+
+  els.debugClearBtn.addEventListener("click", () => {
+    els.debugLog.innerHTML = "";
+    els.debugLog.appendChild(els.debugEmptyState);
+    els.debugEmptyState.style.display = "block";
+  });
+
+  // Minimal JSON syntax highlighter (keys / strings / numbers / booleans / null).
+  // No dependency - just the classic regex-per-token approach.
+  function syntaxHighlightJson(value) {
+    const json = JSON.stringify(value, null, 2)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    return json.replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+      (match) => {
+        if (/^"/.test(match)) {
+          return `<span class="${/:$/.test(match) ? "json-key" : "json-string"}">${match}</span>`;
+        }
+        if (match === "true" || match === "false") return `<span class="json-boolean">${match}</span>`;
+        if (match === "null") return `<span class="json-null">${match}</span>`;
+        return `<span class="json-number">${match}</span>`;
+      }
+    );
+  }
+
+  function buildJsonBlock(label, value, tokenCount) {
+    const details = document.createElement("details");
+    details.className = "debug-block";
+
+    const summary = document.createElement("summary");
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = label;
+    summary.appendChild(labelSpan);
+
+    if (typeof tokenCount === "number") {
+      const badge = document.createElement("span");
+      badge.className = "token-badge";
+      badge.textContent = `${tokenCount} tokens`;
+      summary.appendChild(badge);
+    }
+
+    details.appendChild(summary);
+
+    const wrap = document.createElement("div");
+    wrap.className = "json-wrap";
+
+    const raw = JSON.stringify(value, null, 2);
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "copy-btn";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(raw).then(() => {
+        copyBtn.textContent = "Copied";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1200);
+      });
+    });
+    wrap.appendChild(copyBtn);
+
+    const pre = document.createElement("pre");
+    pre.className = "json-view";
+    pre.innerHTML = syntaxHighlightJson(value);
+    wrap.appendChild(pre);
+
+    details.appendChild(wrap);
+    return details;
+  }
+
+  function formatDebugMeta(debug) {
+    const parts = [new Date().toLocaleTimeString([], { hour12: false })];
+    if (debug.request && debug.request.model) parts.push(debug.request.model);
+
+    const usage = debug.response && debug.response.usage;
+    if (usage) {
+      parts.push(`${usage.total_tokens} tokens total`);
+    }
+    if (typeof debug.elapsed_ms === "number") {
+      parts.push(`${Math.round(debug.elapsed_ms)} ms`);
+    }
+
+    const finishReason = debug.response && debug.response.choices && debug.response.choices[0] &&
+      debug.response.choices[0].finish_reason;
+    if (finishReason) {
+      parts.push(finishReason);
+    } else if (debug.error) {
+      parts.push("error");
+    }
+
+    return parts.join(" · ");
+  }
+
+  function addDebugEntry(debug) {
+    if (!debug) return;
+    els.debugEmptyState.style.display = "none";
+
+    const usage = debug.response && debug.response.usage;
+
+    const entry = document.createElement("div");
+    entry.className = "debug-entry";
+
+    const meta = document.createElement("div");
+    meta.className = "debug-entry-meta";
+    meta.textContent = formatDebugMeta(debug);
+    entry.appendChild(meta);
+
+    entry.appendChild(buildJsonBlock("Request", debug.request, usage && usage.prompt_tokens));
+
+    if (debug.response) {
+      entry.appendChild(buildJsonBlock("Response", debug.response, usage && usage.completion_tokens));
+    } else if (debug.error) {
+      const err = document.createElement("div");
+      err.className = "debug-error";
+      err.textContent = debug.error;
+      entry.appendChild(err);
+    }
+
+    els.debugLog.appendChild(entry);
+    els.debugLog.scrollTop = els.debugLog.scrollHeight;
+  }
+
+  // ---- Chat ----
+  function addBubble(role, text, opts) {
+    opts = opts || {};
+    els.emptyState.style.display = "none";
+
+    const row = document.createElement("div");
+    row.className = "msg-row " + role;
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble" + (opts.error ? " error" : "") + (opts.pending ? " pending" : "");
+    bubble.textContent = text;
+
+    row.appendChild(bubble);
+    els.transcript.appendChild(row);
+    els.transcript.scrollTop = els.transcript.scrollHeight;
+    return bubble;
+  }
+
+  async function sendMessage() {
+    const text = els.promptInput.value.trim();
+    if (!text) return;
+
+    addBubble("user", text);
+    els.promptInput.value = "";
+    autoResize();
+    els.sendBtn.disabled = true;
+
+    const pending = addBubble("assistant", "Thinking…", { pending: true });
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        pending.textContent = "Error: " + (body.detail || res.statusText);
+        pending.classList.add("error");
+        pending.classList.remove("pending");
+      } else {
+        pending.textContent = body.answer;
+        pending.classList.remove("pending");
+        addDebugEntry(body.debug);
+      }
+    } catch (err) {
+      pending.textContent = "Error: could not reach the server (" + err.message + ")";
+      pending.classList.add("error");
+      pending.classList.remove("pending");
+    } finally {
+      els.sendBtn.disabled = false;
+      els.transcript.scrollTop = els.transcript.scrollHeight;
+    }
+  }
+
+  function autoResize() {
+    els.promptInput.style.height = "auto";
+    els.promptInput.style.height = Math.min(els.promptInput.scrollHeight, 220) + "px";
+  }
+
+  els.promptInput.addEventListener("input", autoResize);
+
+  els.promptInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+    // Shift+Enter (or any other paste/typing) falls through to the textarea's
+    // default behavior, which handles multi-line text natively - this is
+    // what a plain <input> / terminal input() cannot do.
+  });
+
+  els.sendBtn.addEventListener("click", sendMessage);
+
+  loadConfig().catch((err) => {
+    console.error(err);
+    addBubble("assistant", "Failed to load settings from the server: " + err.message, { error: true });
+  });
+})();
+</script>
+
+</body>
+</html>
