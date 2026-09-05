@@ -48,9 +48,9 @@ uv run server.py
 
 Then open **http://127.0.0.1:8000** in your browser.
 
-A settings panel on the left (model, system prompt, stop sequences, response format — the same options as the CLI's commands, just as dropdowns/inputs instead of `/commands`), the chat itself centered in the middle. The message box is a real `<textarea>`: paste or type text of any length, including text with line breaks — it's never cut off. Press **Enter** to send, **Shift+Enter** for a line break.
+A settings panel on the left (model, system prompt, stop sequences, response format, reasoning effort — the same options as the CLI's commands, just as dropdowns/inputs instead of `/commands`), the chat itself centered in the middle. The message box is a real `<textarea>`: paste or type text of any length, including text with line breaks — it's never cut off. Press **Enter** to send, **Shift+Enter** for a line break.
 
-Tick **"Show debug panel"** at the bottom of the settings panel to open a third column on the right that logs, for every message, the exact JSON sent to the DeepSeek API and the exact JSON it returned — model, token usage, latency and finish reason as a one-line summary, then the full request/response bodies underneath (syntax-highlighted, collapsible, with a Copy button each). The panel logs every message for the current page session regardless of whether it's shown or hidden, so toggling it back on doesn't lose earlier entries; "Clear log" empties it without touching the conversation. Only the on/off toggle itself is remembered across reloads (via the browser's `localStorage`) — the log is cleared on refresh.
+Tick **"Show debug panel"** at the bottom of the settings panel to open a third column on the right that logs, for every message, the exact JSON sent to the DeepSeek API and the exact JSON it returned — model, token usage (including reasoning tokens, when any were spent), latency and finish reason as a one-line summary, then the full request/response bodies underneath (syntax-highlighted, collapsible, with a Copy button each, and the token count for that half of the exchange shown right next to its label). The panel logs every message for the current page session regardless of whether it's shown or hidden, so toggling it back on doesn't lose earlier entries; "Clear log" empties it without touching the conversation. Only the on/off toggle itself is remembered across reloads (via the browser's `localStorage`) — the log is cleared on refresh.
 
 Planned next: temperature and other sampling parameters.
 
@@ -70,6 +70,7 @@ Messages can span multiple lines and be of any length — this also covers pasti
 | `/system`           | List system prompts and switch the active one          |
 | `/stop`             | Set stop sequence(s) (up to 16, comma-separated)       |
 | `/response_format`  | Choose the response format: `text` or `json_object`   |
+| `/reasoning`        | Set reasoning effort: `off`, `low`, `high`, or `max`   |
 | `/exit`             | Quit the CLI                                           |
 
 Both interfaces send each message independently — no conversation history is kept between turns (the web GUI's transcript is just a visual log; each request to the model still only contains the one message you just sent).
@@ -93,5 +94,6 @@ Both interfaces also let you enter a custom system prompt of your own instead of
 
 - **`stop`** — optional; up to 16 sequences. Leave empty to clear.
 - **`response_format`** — only `text` (default) and `json_object` are supported by the DeepSeek API. When using `json_object`, you must also ask for JSON explicitly in your message — otherwise the model may generate whitespace until it hits the token limit (see the [DeepSeek API docs](https://api-docs.deepseek.com/api/create-chat-completion)).
+- **Reasoning effort** — DeepSeek's models think before answering by default, even with nothing set: every response carries a `reasoning_content` field and spends billed `reasoning_tokens`, confirmed by inspecting live responses. `off`, `low`, `high`, `max` map directly to the API's `reasoning_effort` parameter, except `off`, which sends `reasoning_effort: "none"` - the one value that disables thinking entirely. Default here is `low`.
 
 **Note on response length:** there is no reliable API parameter to force an exact response length — `max_tokens` is only a hard cutoff that truncates mid-sentence if hit, not a length target. To control how long the answer is, ask for it explicitly in your message (e.g. "in 2-3 sentences", "under 50 words").

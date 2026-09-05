@@ -29,12 +29,13 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 client = chat.load_client()
 
-# Mirrors the CLI's current_model / current_system_prompt / stop / response_format.
+# Mirrors the CLI's current_model / current_system_prompt / stop / response_format / reasoning_effort.
 state: dict = {
     "model": chat.DEFAULT_MODEL,
     "system_prompt": chat.DEFAULT_SYSTEM_PROMPT,
     "stop": None,
     "response_format": chat.DEFAULT_RESPONSE_FORMAT,
+    "reasoning_effort": chat.DEFAULT_REASONING_EFFORT,
 }
 
 
@@ -47,6 +48,7 @@ class SettingsRequest(BaseModel):
     system_prompt: str | None = None
     stop: list[str] | None = None
     response_format: str | None = None
+    reasoning_effort: str | None = None
 
 
 @app.get("/")
@@ -61,6 +63,7 @@ def get_config() -> dict:
         "models": chat.MODELS,
         "system_prompts": [{"name": name, "prompt": prompt} for name, prompt in chat.SYSTEM_PROMPTS],
         "response_formats": chat.RESPONSE_FORMATS,
+        "reasoning_efforts": chat.REASONING_EFFORTS,
         "stop_sequences_limit": chat.STOP_SEQUENCES_LIMIT,
         "state": state,
     }
@@ -86,6 +89,11 @@ def update_settings(req: SettingsRequest) -> dict:
             raise HTTPException(400, f"Unknown response format: {req.response_format}")
         state["response_format"] = req.response_format
 
+    if req.reasoning_effort is not None:
+        if req.reasoning_effort not in chat.REASONING_EFFORTS:
+            raise HTTPException(400, f"Unknown reasoning effort: {req.reasoning_effort}")
+        state["reasoning_effort"] = req.reasoning_effort
+
     return {"state": state}
 
 
@@ -102,6 +110,7 @@ def post_chat(req: ChatRequest) -> dict:
         message,
         state["stop"],
         state["response_format"],
+        state["reasoning_effort"],
     )
     return {
         "answer": reply.answer,

@@ -20,6 +20,14 @@ RESPONSE_FORMATS = ["text", "json_object"]
 # Per DeepSeek API docs (stop): up to 16 sequences are accepted.
 STOP_SEQUENCES_LIMIT = 16
 
+# DeepSeek's models think by default even with no reasoning_effort param sent
+# at all (confirmed live: reasoning_content and usage.completion_tokens_details
+# .reasoning_tokens show up unprompted). "off" is our own label for that
+# off-switch - on the wire it's reasoning_effort="none", the one value that
+# actually disables thinking; the rest (low/high/max) tune its budget.
+REASONING_EFFORTS = ["off", "low", "high", "max"]
+REASONING_EFFORT_OFF = "off"
+
 SYSTEM_PROMPTS = [
     ("Default", "You are a helpful assistant."),
     (
@@ -34,9 +42,10 @@ SYSTEM_PROMPTS = [
 DEFAULT_MODEL = MODELS[0]
 DEFAULT_RESPONSE_FORMAT = RESPONSE_FORMATS[0]
 DEFAULT_SYSTEM_PROMPT = SYSTEM_PROMPTS[0][1]
+DEFAULT_REASONING_EFFORT = "low"
 BASE_URL = "https://api.deepseek.com"
 
-COMMANDS = {"/exit", "/models", "/system", "/stop", "/response_format"}
+COMMANDS = {"/exit", "/models", "/system", "/stop", "/response_format", "/reasoning"}
 
 
 def load_client() -> OpenAI:
@@ -54,6 +63,7 @@ def print_welcome(
     stop: list[str] | None,
     response_format: str,
     current_system_prompt: str,
+    reasoning_effort: str,
 ) -> None:
     print("=" * 60)
     print("DeepSeek CLI Chat")
@@ -66,12 +76,14 @@ def print_welcome(
     print("  /system          - list system prompts and switch the active one")
     print("  /stop            - set stop sequence(s) (up to 16)")
     print("  /response_format - choose response format: text or json_object")
+    print("  /reasoning       - set reasoning effort: off, low, high, or max")
     print("  /exit            - quit the CLI")
     print("-" * 60)
     print(f"Current model: {current_model}")
     print(f"Current system prompt: {current_system_prompt}")
     print(f"Current stop sequences: {', '.join(stop) if stop else 'not set'}")
     print(f"Current response format: {response_format}")
+    print(f"Current reasoning effort: {reasoning_effort}")
     print("=" * 60)
 
 
@@ -169,6 +181,26 @@ def set_response_format(current_format: str) -> str:
     return current_format
 
 
+def set_reasoning_effort(current_effort: str) -> str:
+    print("Available reasoning efforts:")
+    for idx, effort in enumerate(REASONING_EFFORTS, start=1):
+        marker = " (current)" if effort == current_effort else ""
+        note = " - disables thinking entirely" if effort == REASONING_EFFORT_OFF else ""
+        print(f"  {idx}. {effort}{marker}{note}")
+
+    choice = input("Enter effort number (or press Enter to keep current): ").strip()
+    if not choice:
+        return current_effort
+
+    if choice.isdigit() and 1 <= int(choice) <= len(REASONING_EFFORTS):
+        selected = REASONING_EFFORTS[int(choice) - 1]
+        print(f"Switched to reasoning effort: {selected}")
+        return selected
+
+    print("Invalid choice, keeping current reasoning effort.")
+    return current_effort
+
+
 def read_message(prompt: str) -> str | None:
     """Read one user message, supporting text of any length pasted across lines.
 
@@ -227,6 +259,7 @@ def ask_model(
     user_message: str,
     stop: list[str] | None,
     response_format: str,
+    reasoning_effort: str,
 ) -> ModelReply:
     request_kwargs = {
         "model": model,
@@ -239,6 +272,8 @@ def ask_model(
         request_kwargs["stop"] = stop
     if response_format != "text":
         request_kwargs["response_format"] = {"type": response_format}
+    # "off" is our label; DeepSeek's actual off-switch value is "none".
+    request_kwargs["reasoning_effort"] = "none" if reasoning_effort == REASONING_EFFORT_OFF else reasoning_effort
 
     start = time.perf_counter()
     try:
@@ -276,7 +311,8 @@ def main() -> None:
     current_system_prompt = DEFAULT_SYSTEM_PROMPT
     stop: list[str] | None = None
     response_format = DEFAULT_RESPONSE_FORMAT
-    print_welcome(current_model, stop, response_format, current_system_prompt)
+    reasoning_effort = DEFAULT_REASONING_EFFORT
+    print_welcome(current_model, stop, response_format, current_system_prompt, reasoning_effort)
 
     while True:
         user_input = read_message("\n> ")
@@ -308,7 +344,13 @@ def main() -> None:
             response_format = set_response_format(response_format)
             continue
 
-        reply = ask_model(client, current_model, current_system_prompt, user_input, stop, response_format)
+        if user_input == "/reasoning":
+            reasoning_effort = set_reasoning_effort(reasoning_effort)
+            continue
+
+        reply = ask_model(
+            client, current_model, current_system_prompt, user_input, stop, response_format, reasoning_effort
+        )
         print(f"\n{reply.answer}")
 
 
