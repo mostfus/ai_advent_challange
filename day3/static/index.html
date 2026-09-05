@@ -492,6 +492,12 @@
       </div>
     </div>
 
+    <div class="field">
+      <label for="reasoning-effort-select">Reasoning effort</label>
+      <select id="reasoning-effort-select"></select>
+      <div class="hint">DeepSeek thinks before answering by default. "Off" disables thinking entirely; low/high/max tune its budget - see the reasoning tokens in the debug panel.</div>
+    </div>
+
     <div class="field divider">
       <label class="checkbox-label">
         <input type="checkbox" id="debug-toggle" />
@@ -546,6 +552,7 @@
     stopInput: document.getElementById("stop-input"),
     responseFormatSelect: document.getElementById("response-format-select"),
     jsonFormatHint: document.getElementById("json-format-hint"),
+    reasoningEffortSelect: document.getElementById("reasoning-effort-select"),
     transcript: document.getElementById("transcript"),
     emptyState: document.getElementById("empty-state"),
     promptInput: document.getElementById("prompt-input"),
@@ -592,6 +599,11 @@
       els.responseFormatSelect.add(new Option(fmt, fmt, false, fmt === cfg.state.response_format));
     }
     els.jsonFormatHint.style.display = cfg.state.response_format === "json_object" ? "block" : "none";
+
+    els.reasoningEffortSelect.innerHTML = "";
+    for (const effort of cfg.reasoning_efforts) {
+      els.reasoningEffortSelect.add(new Option(effort, effort, false, effort === cfg.state.reasoning_effort));
+    }
 
     els.stopInput.value = (cfg.state.stop || []).join(", ");
   }
@@ -641,6 +653,10 @@
     const value = els.responseFormatSelect.value;
     els.jsonFormatHint.style.display = value === "json_object" ? "block" : "none";
     postSettings({ response_format: value });
+  });
+
+  els.reasoningEffortSelect.addEventListener("change", () => {
+    postSettings({ reasoning_effort: els.reasoningEffortSelect.value });
   });
 
   // ---- Debug panel ----
@@ -732,6 +748,10 @@
     const usage = debug.response && debug.response.usage;
     if (usage) {
       parts.push(`${usage.total_tokens} tokens total`);
+      const reasoningTokens = usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens;
+      if (typeof reasoningTokens === "number" && reasoningTokens > 0) {
+        parts.push(`${reasoningTokens} reasoning`);
+      }
     }
     if (typeof debug.elapsed_ms === "number") {
       parts.push(`${Math.round(debug.elapsed_ms)} ms`);
