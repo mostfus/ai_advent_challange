@@ -1,0 +1,11 @@
+{
+  "name": "day4-ui-tests",
+  "private": true,
+  "description": "Headless jsdom checks for the DeepSeek chat UI",
+  "scripts": {
+    "test": "node tests/ui-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0"
+  }
+}
