@@ -1,0 +1,1812 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DeepSeek Chat</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --border: #dcdce0;
+    --text: #1c1c1f;
+    --text-muted: #6b6b76;
+    --accent: #2f6fed;
+    --accent-text: #ffffff;
+    --bubble-user: #2f6fed;
+    --bubble-user-text: #ffffff;
+    --bubble-assistant: #ececef;
+    --bubble-assistant-text: #1c1c1f;
+    --bubble-error: #fdecea;
+    --bubble-error-text: #9c2a1e;
+    --input-bg: #ffffff;
+    --json-key: #2f6fed;
+    --json-string: #1f7a4d;
+    --json-number: #a15c00;
+    --json-boolean: #7c4fd1;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181c;
+      --panel-bg: #1f2024;
+      --border: #313238;
+      --text: #eceef1;
+      --text-muted: #9a9aa4;
+      --accent: #5b8bf0;
+      --accent-text: #0c0d10;
+      --bubble-user: #5b8bf0;
+      --bubble-user-text: #0c0d10;
+      --bubble-assistant: #2b2c32;
+      --bubble-assistant-text: #eceef1;
+      --bubble-error: #3a2220;
+      --bubble-error-text: #ff8a80;
+      --input-bg: #26272c;
+      --json-key: #5b8bf0;
+      --json-string: #5fd08a;
+      --json-number: #e0a458;
+      --json-boolean: #b39ddb;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- Tab bar (single chat / compare / free models) ---- */
+  #tabbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 18px;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #tabbar .brand {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  #tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 3px;
+  }
+
+  .tab {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 5px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+
+  .tab:hover { color: var(--text); }
+
+  .tab.active {
+    background: var(--panel-bg);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  }
+
+  .view {
+    display: none;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .view.active { display: flex; }
+
+  /* ---- Single-chat view: settings | chat | debug ---- */
+  #single-view {
+    flex-direction: row;
+  }
+
+  /* Below this, side-by-side stops making sense - stack instead. Always in
+     normal document flow (never fixed/hidden), so the settings panel can
+     never end up invisible off-screen. */
+  @media (max-width: 760px) {
+    #single-view { flex-direction: column; min-height: 100vh; }
+    #settings-panel { width: 100%; max-height: 45vh; border-right: none; border-bottom: 1px solid var(--border); }
+    #chat-col { height: 70vh; }
+    #chat-inner { width: 100%; max-width: 100%; }
+    #debug-panel { width: 100%; max-height: 55vh; border-left: none; border-top: 1px solid var(--border); }
+  }
+
+  #settings-panel {
+    width: 300px;
+    flex-shrink: 0;
+    background: var(--panel-bg);
+    border-right: 1px solid var(--border);
+    padding: 20px 18px;
+    overflow-y: auto;
+  }
+
+  #settings-panel h1 {
+    font-size: 16px;
+    margin: 0 0 18px;
+  }
+
+  #chat-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* Centered chat column: roughly a third of the viewport width, with sane
+     bounds so it stays readable on both narrow and very wide windows. */
+  #chat-inner {
+    width: clamp(420px, 34vw, 760px);
+    max-width: 100%;
+    margin: 0 auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  #debug-panel {
+    display: none;
+    flex: 1;
+    min-width: 320px;
+    flex-direction: column;
+    background: var(--panel-bg);
+    border-left: 1px solid var(--border);
+    min-height: 0;
+  }
+
+  #single-view.show-debug #debug-panel { display: flex; }
+
+  /* ---- Settings form (shared by both views) ---- */
+  .field {
+    margin-bottom: 18px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  select, input[type="text"], textarea {
+    width: 100%;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
+  }
+
+  select:focus, input[type="text"]:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  .custom-prompt {
+    margin-top: 8px;
+  }
+
+  .custom-prompt textarea {
+    resize: vertical;
+    min-height: 64px;
+  }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .slider-row input[type="range"] {
+    flex: 1;
+    width: auto;
+    accent-color: var(--accent);
+    cursor: pointer;
+    min-width: 0;
+  }
+
+  .slider-value {
+    min-width: 34px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .preset-btn {
+    background: var(--input-bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 9px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .preset-btn:hover {
+    color: var(--text);
+  }
+
+  .preset-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .field.divider {
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: auto;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  /* ---- Chat body (shared by both views) ---- */
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel-bg);
+  }
+
+  #topbar h2 {
+    font-size: 15px;
+    margin: 0;
+    font-weight: 600;
+  }
+
+  .chat-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .empty-state {
+    margin: auto;
+    text-align: center;
+    color: var(--text-muted);
+    max-width: 360px;
+  }
+
+  .msg-row {
+    display: flex;
+  }
+
+  .msg-row.user { justify-content: flex-end; }
+  .msg-row.assistant { justify-content: flex-start; }
+
+  .bubble {
+    max-width: 70%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
+  }
+
+  .msg-row.user .bubble {
+    background: var(--bubble-user);
+    color: var(--bubble-user-text);
+    border-bottom-right-radius: 4px;
+  }
+
+  .msg-row.assistant .bubble {
+    background: var(--bubble-assistant);
+    color: var(--bubble-assistant-text);
+    border-bottom-left-radius: 4px;
+  }
+
+  .msg-row.assistant .bubble.error {
+    background: var(--bubble-error);
+    color: var(--bubble-error-text);
+  }
+
+  .msg-row.assistant .bubble.pending {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .composer {
+    border-top: 1px solid var(--border);
+    background: var(--panel-bg);
+    padding: 14px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  .prompt-input {
+    flex: 1;
+    resize: none;
+    max-height: 220px;
+    overflow-y: auto;
+    line-height: 1.4;
+    min-width: 0;
+  }
+
+  .send-btn {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .send-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .composer-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 20px 10px;
+    text-align: right;
+  }
+
+  /* ---- Debug body (shared by both views) ---- */
+  .debug-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .debug-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .debug-header h1 {
+    font-size: 16px;
+    margin: 0;
+  }
+
+  .text-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .text-btn:hover { background: var(--bubble-assistant); }
+
+  .debug-log {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .debug-entry {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .debug-entry-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  .debug-block {
+    margin-top: 10px;
+  }
+
+  .debug-block:first-of-type {
+    margin-top: 0;
+  }
+
+  .debug-block summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 2px 0;
+    user-select: none;
+    list-style: none;
+  }
+
+  /* display:flex drops the browser's built-in disclosure triangle (it only
+     renders for the default display:list-item), so draw our own - a small
+     arrow that rotates from closed (▸) to open (▾). */
+  .debug-block summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .debug-block summary::before {
+    content: "";
+    flex-shrink: 0;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid var(--text-muted);
+    transition: transform 0.15s ease;
+  }
+
+  .debug-block[open] > summary::before {
+    transform: rotate(90deg);
+  }
+
+  .token-badge {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--json-number);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+  }
+
+  .json-wrap {
+    min-width: 0;
+  }
+
+  .copy-btn {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 11px;
+    border-radius: 6px;
+    padding: 2px 8px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .copy-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
+  /* A response body is mostly one very long string (the answer itself), which
+     as `white-space: pre` would run off to the right for screens on end.
+     Wrapping keeps every entry inside the panel's width - `pre-wrap` preserves
+     the indentation, `anywhere` breaks tokens with no spaces in them (long
+     words, ids, base64), and the max-width/min-width pair below stops a wide
+     line from stretching the panel itself. */
+  .json-view {
+    margin: 6px 0 0;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 100%;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .json-key { color: var(--json-key); }
+  .json-string { color: var(--json-string); }
+  .json-number { color: var(--json-number); }
+  .json-boolean, .json-null { color: var(--json-boolean); }
+
+  .debug-error {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--bubble-error);
+    color: var(--bubble-error-text);
+    border-radius: 8px;
+    font-size: 12.5px;
+    white-space: pre-wrap;
+  }
+
+  /* ---- Column views ----
+     Two tabs are built out of columns: "Compare models" (DeepSeek, one pane
+     per parameter set) and "Free models" (OpenRouter, one pane per model).
+     Everything below is shared by both; the ids stay on the elements for the
+     JS to grab, but nothing is styled through them. */
+  .grid-view {
+    flex-direction: column;
+  }
+
+  .pane-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .pane-toolbar .toolbar-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+
+  .primary-btn {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .primary-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .ghost-btn {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .ghost-btn:hover { border-color: var(--accent); }
+
+  /* Each pane gets `flex: 1 1 0`, so N panes split the available width in
+     equal shares no matter how many there are. min-width keeps a pane
+     usable: once the shares would go below it the row scrolls sideways
+     instead of squeezing the panes into unreadable slivers. 260px is chosen
+     so that all 5 panes still fit side by side on a 1440px screen
+     (5x260 + 4 gaps + padding = ~1372px). */
+  .pane-grid {
+    flex: 1;
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    overflow-x: auto;
+    min-height: 0;
+  }
+
+  .pane {
+    flex: 1 1 0;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .pane-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .pane-title {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .icon-btn {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    padding: 5px 7px;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .icon-btn:hover {
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .icon-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .icon-btn.close:hover {
+    background: var(--bubble-error);
+    color: var(--bubble-error-text);
+  }
+
+  /* The one-line recap of a pane's parameters - the thing you actually scan
+     when comparing columns, so it stays visible even with settings closed. */
+  .pane-summary {
+    padding: 6px 12px 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    line-height: 1.4;
+    flex-shrink: 0;
+  }
+
+  /* A free-models pane has no settings form: choosing the model *is* its
+     whole configuration, so the dropdown sits in the header where the title
+     would otherwise be. */
+  .pane-model-select {
+    flex: 1;
+    min-width: 0;
+    font-size: 12.5px;
+    padding: 5px 6px;
+  }
+
+  .pane-settings {
+    display: none;
+    padding: 14px 12px 0;
+    border-bottom: 1px solid var(--border);
+    max-height: 62%;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .pane.show-settings .pane-settings { display: block; }
+
+  .pane-debug {
+    display: none;
+    border-top: 1px solid var(--border);
+    max-height: 45%;
+    min-height: 160px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .pane.show-debug .pane-debug { display: flex; }
+
+  .pane .composer {
+    padding: 10px 12px;
+  }
+
+  .pane .composer-hint {
+    padding: 0 12px 8px;
+  }
+
+  .pane .transcript {
+    padding: 14px 12px;
+    gap: 10px;
+  }
+
+  .pane .bubble {
+    max-width: 88%;
+    font-size: 14px;
+    padding: 8px 11px;
+  }
+
+  .pane .debug-header {
+    padding: 10px 12px;
+  }
+
+  .pane .debug-header h1 {
+    font-size: 13px;
+  }
+
+  .pane .debug-log {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .pane .send-btn {
+    padding: 9px 14px;
+  }
+
+  /* Whole-tab problems - no API key, catalogue unreachable - shown above the
+     grid rather than inside a pane, since they apply to every column. */
+  .notice {
+    margin: 12px 12px 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.45;
+    background: var(--bubble-error);
+    color: var(--bubble-error-text);
+    flex-shrink: 0;
+  }
+
+  .notice.hidden { display: none; }
+
+  .notice code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+
+  .pane-empty {
+    margin: auto;
+    text-align: center;
+    color: var(--text-muted);
+    max-width: 420px;
+    line-height: 1.5;
+  }
+
+  /* Shared prompt bar: one message, fanned out to every pane as separate,
+     independent requests. */
+  .broadcast {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    padding: 12px 16px;
+    background: var(--panel-bg);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .broadcast-input {
+    flex: 1;
+    resize: none;
+    max-height: 160px;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+
+<div id="tabbar">
+  <div class="brand">DeepSeek Chat</div>
+  <div id="tabs">
+    <button type="button" class="tab active" data-view="single">Single chat</button>
+    <button type="button" class="tab" data-view="compare">Compare models</button>
+    <button type="button" class="tab" data-view="free">Free models</button>
+  </div>
+</div>
+
+<div id="single-view" class="view active">
+  <aside id="settings-panel">
+    <h1>Settings</h1>
+    <div id="single-settings-mount"></div>
+
+    <div class="field divider">
+      <label class="checkbox-label">
+        <input type="checkbox" id="debug-toggle" />
+        Show debug panel
+      </label>
+      <div class="hint">Shows the exact request and response JSON for each message, with token usage and timing.</div>
+    </div>
+  </aside>
+
+  <div id="chat-col">
+    <div id="topbar">
+      <h2>DeepSeek Chat</h2>
+    </div>
+    <div id="chat-inner"></div>
+  </div>
+
+  <aside id="debug-panel"></aside>
+</div>
+
+<div id="compare-view" class="view grid-view">
+  <div id="compare-toolbar" class="pane-toolbar">
+    <button type="button" class="primary-btn" id="add-chat-btn">+ Add chat</button>
+    <span class="toolbar-hint" id="compare-count"></span>
+  </div>
+
+  <div id="compare-grid" class="pane-grid">
+    <div id="compare-empty" class="pane-empty">
+      No chats yet. Add up to 5 side by side, give each its own model and parameters,
+      then send the same prompt to all of them to compare the answers.
+    </div>
+  </div>
+
+  <div id="broadcast" class="broadcast">
+    <textarea id="broadcast-input" class="broadcast-input" rows="1" placeholder="Send the same message to every chat…"></textarea>
+    <button type="button" class="send-btn" id="broadcast-btn">Send to all</button>
+  </div>
+</div>
+
+<!-- Day 5: the same column layout, pointed at OpenRouter's free models. No
+     parameter forms here - a column is just a model, so that the only thing
+     that differs between columns is the model itself. -->
+<div id="free-view" class="view grid-view">
+  <div id="free-toolbar" class="pane-toolbar">
+    <button type="button" class="primary-btn" id="add-free-btn">+ Add model</button>
+    <span class="toolbar-hint" id="free-count"></span>
+  </div>
+
+  <div id="free-notice" class="notice hidden"></div>
+
+  <div id="free-grid" class="pane-grid">
+    <div id="free-empty" class="pane-empty">Loading OpenRouter's free models…</div>
+  </div>
+
+  <div id="free-broadcast" class="broadcast">
+    <textarea id="free-broadcast-input" class="broadcast-input" rows="1" placeholder="Ask every model the same question…"></textarea>
+    <button type="button" class="send-btn" id="free-broadcast-btn">Send to all</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  let CONFIG = null;
+  let idCounter = 0;
+  const CUSTOM_VALUE = "__custom__";
+
+  // ---------------------------------------------------------------- helpers
+  function makeEl(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  // A labelled settings row. The label points at the first child that has an
+  // id, so clicking it focuses the actual control.
+  function field(labelText, ...children) {
+    const wrap = makeEl("div", "field");
+    const label = makeEl("label", null, labelText);
+    const target = children
+      .map((child) => (child && child.id ? child : child && child.querySelector("[id]")))
+      .find(Boolean);
+    if (target) label.htmlFor = target.id;
+    wrap.appendChild(label);
+    for (const child of children) if (child) wrap.appendChild(child);
+    return wrap;
+  }
+
+  // Minimal JSON syntax highlighter (keys / strings / numbers / booleans / null).
+  // No dependency - just the classic regex-per-token approach.
+  function syntaxHighlightJson(value) {
+    const json = JSON.stringify(value, null, 2)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    return json.replace(
+      /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+      (match) => {
+        if (/^"/.test(match)) {
+          return `<span class="${/:$/.test(match) ? "json-key" : "json-string"}">${match}</span>`;
+        }
+        if (match === "true" || match === "false") return `<span class="json-boolean">${match}</span>`;
+        if (match === "null") return `<span class="json-null">${match}</span>`;
+        return `<span class="json-number">${match}</span>`;
+      }
+    );
+  }
+
+  function buildJsonBlock(label, value, tokenCount) {
+    const details = makeEl("details", "debug-block");
+    const summary = makeEl("summary");
+    summary.appendChild(makeEl("span", null, label));
+
+    if (typeof tokenCount === "number") {
+      summary.appendChild(makeEl("span", "token-badge", `${tokenCount} tokens`));
+    }
+
+    const raw = JSON.stringify(value, null, 2);
+    const copyBtn = makeEl("button", "copy-btn", "Copy");
+    copyBtn.type = "button";
+    copyBtn.addEventListener("click", (e) => {
+      // The button lives inside <summary>; without this the click would also
+      // fold the block it belongs to.
+      e.preventDefault();
+      e.stopPropagation();
+      navigator.clipboard.writeText(raw).then(() => {
+        copyBtn.textContent = "Copied";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1200);
+      });
+    });
+    summary.appendChild(copyBtn);
+    details.appendChild(summary);
+
+    const wrap = makeEl("div", "json-wrap");
+    const pre = makeEl("pre", "json-view");
+    pre.innerHTML = syntaxHighlightJson(value);
+    wrap.appendChild(pre);
+
+    details.appendChild(wrap);
+    return details;
+  }
+
+  function formatDebugMeta(debug) {
+    const parts = [new Date().toLocaleTimeString([], { hour12: false })];
+    if (debug.request && debug.request.model) parts.push(debug.request.model);
+    if (debug.request && typeof debug.request.temperature === "number") {
+      parts.push(`T ${debug.request.temperature}`);
+    }
+
+    const usage = debug.response && debug.response.usage;
+    if (usage) {
+      parts.push(`${usage.total_tokens} tokens total`);
+      const reasoningTokens = usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens;
+      if (typeof reasoningTokens === "number" && reasoningTokens > 0) {
+        parts.push(`${reasoningTokens} reasoning`);
+      }
+    }
+    if (typeof debug.elapsed_ms === "number") {
+      parts.push(`${Math.round(debug.elapsed_ms)} ms`);
+    }
+
+    const finishReason = debug.response && debug.response.choices && debug.response.choices[0] &&
+      debug.response.choices[0].finish_reason;
+    if (finishReason) {
+      parts.push(finishReason);
+    } else if (debug.error) {
+      parts.push("error");
+    }
+
+    return parts.join(" · ");
+  }
+
+  // One-line recap of a chat's parameters, shown in the pane header.
+  function summarize(settings) {
+    const parts = [
+      settings.model,
+      `T ${settings.temperature.toFixed(1)}`,
+      `reasoning: ${settings.reasoning_effort}`,
+      settings.response_format,
+    ];
+    if (settings.stop.length) parts.push(`${settings.stop.length} stop`);
+    if (!isPresetPrompt(settings.system_prompt)) parts.push("custom prompt");
+    return parts.join(" · ");
+  }
+
+  function isPresetPrompt(prompt) {
+    return CONFIG.system_prompts.some((sp) => sp.prompt === prompt);
+  }
+
+  // ------------------------------------------------------------- settings UI
+  // Builds the parameter form for one chat. Every control writes straight
+  // into that chat's own `settings` object - nothing is shared between
+  // chats and nothing is stored on the server, which is what keeps panes
+  // independent of each other.
+  function buildSettingsForm(settings, onChange, opts) {
+    const compact = !!(opts && opts.compact);
+    const uid = "cfg" + (++idCounter);
+    const root = makeEl("div", "settings-body");
+    const notify = () => onChange && onChange();
+    // In a compare column the explanatory hints (and the temperature preset
+    // chips) would repeat up to five times across narrow columns and push the
+    // controls below the fold - the single-chat view is where they live.
+    const hint = (text) => (compact ? null : makeEl("div", "hint", text));
+
+    // Model
+    const modelSelect = makeEl("select");
+    modelSelect.id = uid + "-model";
+    for (const model of CONFIG.models) {
+      modelSelect.add(new Option(model, model, false, model === settings.model));
+    }
+    modelSelect.addEventListener("change", () => {
+      settings.model = modelSelect.value;
+      notify();
+    });
+    root.appendChild(field("Model", modelSelect));
+
+    // System prompt (presets + custom)
+    const promptSelect = makeEl("select");
+    promptSelect.id = uid + "-prompt";
+    for (const sp of CONFIG.system_prompts) promptSelect.add(new Option(sp.name, sp.name));
+    promptSelect.add(new Option("Custom…", CUSTOM_VALUE));
+
+    const customWrap = makeEl("div", "custom-prompt");
+    const customInput = makeEl("textarea");
+    customInput.placeholder = "Enter a custom system prompt...";
+    customWrap.appendChild(customInput);
+
+    const matching = CONFIG.system_prompts.find((sp) => sp.prompt === settings.system_prompt);
+    if (matching) {
+      promptSelect.value = matching.name;
+      customWrap.style.display = "none";
+    } else {
+      promptSelect.value = CUSTOM_VALUE;
+      customInput.value = settings.system_prompt;
+    }
+
+    promptSelect.addEventListener("change", () => {
+      if (promptSelect.value === CUSTOM_VALUE) {
+        customWrap.style.display = "block";
+        customInput.focus();
+        if (customInput.value.trim()) settings.system_prompt = customInput.value;
+      } else {
+        customWrap.style.display = "none";
+        const sp = CONFIG.system_prompts.find((p) => p.name === promptSelect.value);
+        if (sp) settings.system_prompt = sp.prompt;
+      }
+      notify();
+    });
+    customInput.addEventListener("blur", () => {
+      if (promptSelect.value === CUSTOM_VALUE && customInput.value.trim()) {
+        settings.system_prompt = customInput.value;
+        notify();
+      }
+    });
+    root.appendChild(field("System prompt", promptSelect, customWrap));
+
+    // Stop sequences
+    const stopInput = makeEl("input");
+    stopInput.type = "text";
+    stopInput.id = uid + "-stop";
+    stopInput.placeholder = "comma, separated, values";
+    stopInput.value = settings.stop.join(", ");
+    stopInput.addEventListener("blur", () => {
+      settings.stop = stopInput.value.split(",").map((s) => s.trim()).filter(Boolean)
+        .slice(0, CONFIG.stop_sequences_limit);
+      stopInput.value = settings.stop.join(", ");
+      notify();
+    });
+    root.appendChild(field(
+      "Stop sequences", stopInput,
+      hint(`Up to ${CONFIG.stop_sequences_limit}, comma-separated. Leave empty to clear.`)
+    ));
+
+    // Response format
+    const formatSelect = makeEl("select");
+    formatSelect.id = uid + "-format";
+    for (const fmt of CONFIG.response_formats) {
+      formatSelect.add(new Option(fmt, fmt, false, fmt === settings.response_format));
+    }
+    const formatHint = hint(
+      'DeepSeek requires the message itself to explicitly ask for JSON (mention "json" and describe ' +
+      "the structure), otherwise it may generate until the token limit is hit.");
+    if (formatHint) formatHint.style.display = settings.response_format === "json_object" ? "block" : "none";
+    formatSelect.addEventListener("change", () => {
+      settings.response_format = formatSelect.value;
+      if (formatHint) formatHint.style.display = formatSelect.value === "json_object" ? "block" : "none";
+      notify();
+    });
+    root.appendChild(field("Response format", formatSelect, formatHint));
+
+    // Reasoning effort
+    const effortSelect = makeEl("select");
+    effortSelect.id = uid + "-effort";
+    for (const effort of CONFIG.reasoning_efforts) {
+      effortSelect.add(new Option(effort, effort, false, effort === settings.reasoning_effort));
+    }
+    effortSelect.addEventListener("change", () => {
+      settings.reasoning_effort = effortSelect.value;
+      notify();
+    });
+    root.appendChild(field(
+      "Reasoning effort", effortSelect,
+      hint('DeepSeek thinks before answering by default. "Off" disables thinking entirely; low/high/max ' +
+        "tune its budget - see the reasoning tokens in the debug panel.")
+    ));
+
+    // Temperature
+    const tempCfg = CONFIG.temperature;
+    const sliderRow = makeEl("div", "slider-row");
+    const tempInput = makeEl("input");
+    tempInput.type = "range";
+    tempInput.id = uid + "-temp";
+    tempInput.min = tempCfg.min;
+    tempInput.max = tempCfg.max;
+    tempInput.step = tempCfg.step;
+    tempInput.value = settings.temperature;
+    const tempValue = makeEl("span", "slider-value");
+    sliderRow.appendChild(tempInput);
+    sliderRow.appendChild(tempValue);
+
+    const presetsWrap = compact ? null : makeEl("div", "presets");
+    for (const preset of (compact ? [] : tempCfg.presets)) {
+      const btn = makeEl("button", "preset-btn", `${preset.name} · ${preset.value.toFixed(1)}`);
+      btn.type = "button";
+      btn.dataset.value = preset.value;
+      btn.addEventListener("click", () => {
+        tempInput.value = preset.value;
+        settings.temperature = preset.value;
+        renderTemperature();
+        notify();
+      });
+      presetsWrap.appendChild(btn);
+    }
+
+    // Keeps the number next to the slider and the highlighted preset chip
+    // (if the current value happens to match one) in sync with the slider.
+    function renderTemperature() {
+      const value = Number(tempInput.value);
+      tempValue.textContent = value.toFixed(1);
+      if (!presetsWrap) return;
+      for (const btn of presetsWrap.children) {
+        btn.classList.toggle("active", Number(btn.dataset.value) === value);
+      }
+    }
+
+    // "input" only repaints the readout while dragging; the value is committed
+    // once on "change" (drag released / arrow key).
+    tempInput.addEventListener("input", renderTemperature);
+    tempInput.addEventListener("change", () => {
+      settings.temperature = Number(tempInput.value);
+      renderTemperature();
+      notify();
+    });
+    renderTemperature();
+
+    root.appendChild(field(
+      "Temperature", sliderRow, presetsWrap,
+      hint(`${tempCfg.min}–${tempCfg.max}; ${tempCfg.default} is the API default. Lower is more focused ` +
+        "and repeatable, higher is more varied. The chips are DeepSeek's recommended values per use case.")
+    ));
+
+    return root;
+  }
+
+  // ------------------------------------------------------------ chat instance
+  // One chat: its own transcript, composer and debug log, plus - when the view
+  // wants one - a settings form. All three views are built out of these: the
+  // single-chat view mounts one instance into the page's three columns, and
+  // the compare and free-models views mount N of them into panes. The instance
+  // never touches anything outside its own elements.
+  //
+  // `noSettings` drops the parameter form entirely (the free-models view has
+  // no parameters), and `endpoint`/`buildBody` decide which provider the
+  // instance talks to. Everything below them - bubbles, pending state, debug
+  // entries, error handling - is identical either way.
+  function createChat(options) {
+    options = options || {};
+    const endpoint = options.endpoint || "/api/chat";
+    const settings = options.noSettings
+      ? null
+      : Object.assign({}, CONFIG.defaults, { stop: [] }, options.settings || {});
+    let busy = false;
+
+    const settingsEl = settings
+      ? buildSettingsForm(settings, () => {
+          if (options.onSettingsChange) options.onSettingsChange(settings);
+        }, { compact: options.compact })
+      : null;
+
+    // --- chat body ---
+    const chatEl = makeEl("div", "chat-body");
+    const transcript = makeEl("div", "transcript");
+    const emptyState = makeEl("div", "empty-state",
+      options.emptyText ||
+      "Send a message to start. Paste or type text of any length — Enter sends, Shift+Enter adds a line break.");
+    transcript.appendChild(emptyState);
+
+    const composer = makeEl("div", "composer");
+    const promptInput = makeEl("textarea", "prompt-input");
+    promptInput.rows = 1;
+    promptInput.placeholder = "Type a message...";
+    const sendBtn = makeEl("button", "send-btn", "Send");
+    sendBtn.type = "button";
+    composer.appendChild(promptInput);
+    composer.appendChild(sendBtn);
+
+    chatEl.appendChild(transcript);
+    chatEl.appendChild(composer);
+    chatEl.appendChild(makeEl("div", "composer-hint", "Enter to send · Shift+Enter for a new line"));
+
+    // --- debug body ---
+    const debugEl = makeEl("div", "debug-body");
+    const debugHeader = makeEl("div", "debug-header");
+    debugHeader.appendChild(makeEl("h1", null, options.debugTitle || "Debug"));
+    const clearBtn = makeEl("button", "text-btn", "Clear log");
+    clearBtn.type = "button";
+    debugHeader.appendChild(clearBtn);
+    const debugLog = makeEl("div", "debug-log");
+    const debugEmpty = makeEl("div", "empty-state",
+      "The request and response JSON for each message you send will appear here.");
+    debugLog.appendChild(debugEmpty);
+    debugEl.appendChild(debugHeader);
+    debugEl.appendChild(debugLog);
+
+    clearBtn.addEventListener("click", () => {
+      debugLog.innerHTML = "";
+      debugLog.appendChild(debugEmpty);
+      debugEmpty.style.display = "block";
+    });
+
+    function addBubble(role, text, opts) {
+      opts = opts || {};
+      emptyState.style.display = "none";
+
+      const row = makeEl("div", "msg-row " + role);
+      const bubble = makeEl("div", "bubble" + (opts.error ? " error" : "") + (opts.pending ? " pending" : ""), text);
+      row.appendChild(bubble);
+      transcript.appendChild(row);
+      transcript.scrollTop = transcript.scrollHeight;
+      return bubble;
+    }
+
+    function addDebugEntry(debug) {
+      if (!debug) return;
+      debugEmpty.style.display = "none";
+
+      const usage = debug.response && debug.response.usage;
+      const entry = makeEl("div", "debug-entry");
+      entry.appendChild(makeEl("div", "debug-entry-meta", formatDebugMeta(debug)));
+      entry.appendChild(buildJsonBlock("Request", debug.request, usage && usage.prompt_tokens));
+
+      if (debug.response) {
+        entry.appendChild(buildJsonBlock("Response", debug.response, usage && usage.completion_tokens));
+      } else if (debug.error) {
+        entry.appendChild(makeEl("div", "debug-error", debug.error));
+      }
+
+      debugLog.appendChild(entry);
+      debugLog.scrollTop = debugLog.scrollHeight;
+    }
+
+    // Each call is its own fetch carrying this chat's own request body, so
+    // several chats sending at once stay completely independent - different
+    // models, different parameters, overlapping in flight.
+    function buildBody(text) {
+      return options.buildBody ? options.buildBody(text) : { message: text, settings: settings };
+    }
+
+    async function send(text) {
+      text = (text || "").trim();
+      if (!text || busy) return;
+
+      busy = true;
+      sendBtn.disabled = true;
+      addBubble("user", text);
+      const pending = addBubble("assistant", "Thinking…", { pending: true });
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildBody(text)),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          pending.textContent = "Error: " + (body.detail || res.statusText);
+          pending.classList.add("error");
+          pending.classList.remove("pending");
+        } else {
+          pending.textContent = body.answer;
+          pending.classList.remove("pending");
+          addDebugEntry(body.debug);
+        }
+      } catch (err) {
+        pending.textContent = "Error: could not reach the server (" + err.message + ")";
+        pending.classList.add("error");
+        pending.classList.remove("pending");
+      } finally {
+        busy = false;
+        sendBtn.disabled = false;
+        transcript.scrollTop = transcript.scrollHeight;
+      }
+    }
+
+    function autoResize() {
+      promptInput.style.height = "auto";
+      promptInput.style.height = Math.min(promptInput.scrollHeight, 220) + "px";
+    }
+
+    function sendFromInput() {
+      const text = promptInput.value.trim();
+      if (!text) return;
+      promptInput.value = "";
+      autoResize();
+      send(text);
+    }
+
+    promptInput.addEventListener("input", autoResize);
+    promptInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendFromInput();
+      }
+      // Shift+Enter (or any other paste/typing) falls through to the textarea's
+      // default behavior, which handles multi-line text natively.
+    });
+    sendBtn.addEventListener("click", sendFromInput);
+
+    return {
+      settings,
+      settingsEl,
+      chatEl,
+      debugEl,
+      send,
+      addBubble,
+      isBusy: () => busy,
+      focus: () => promptInput.focus(),
+    };
+  }
+
+  // ------------------------------------------------------------- single view
+  const singleView = document.getElementById("single-view");
+  const debugToggle = document.getElementById("debug-toggle");
+  const DEBUG_VISIBLE_KEY = "deepseek-chat-show-debug";
+  let singleChat = null;
+
+  function mountSingleView() {
+    singleChat = createChat({});
+    document.getElementById("single-settings-mount").appendChild(singleChat.settingsEl);
+    document.getElementById("chat-inner").appendChild(singleChat.chatEl);
+    document.getElementById("debug-panel").appendChild(singleChat.debugEl);
+  }
+
+  function setSingleDebugVisible(visible) {
+    singleView.classList.toggle("show-debug", visible);
+    debugToggle.checked = visible;
+    localStorage.setItem(DEBUG_VISIBLE_KEY, visible ? "1" : "0");
+  }
+
+  debugToggle.addEventListener("change", () => setSingleDebugVisible(debugToggle.checked));
+
+  // ------------------------------------------------------------ compare view
+  const grid = document.getElementById("compare-grid");
+  const compareEmpty = document.getElementById("compare-empty");
+  const addChatBtn = document.getElementById("add-chat-btn");
+  const compareCount = document.getElementById("compare-count");
+  const broadcastInput = document.getElementById("broadcast-input");
+  const broadcastBtn = document.getElementById("broadcast-btn");
+  const panes = [];
+
+  function maxPanes() {
+    return CONFIG.max_compare_chats;
+  }
+
+  function refreshCompareChrome() {
+    const count = panes.length;
+    addChatBtn.disabled = count >= maxPanes();
+    compareCount.textContent = `${count} of ${maxPanes()} chats`;
+    compareEmpty.style.display = count ? "none" : "block";
+    broadcastBtn.disabled = count === 0;
+    broadcastInput.disabled = count === 0;
+  }
+
+  function addPane() {
+    if (panes.length >= maxPanes()) return null;
+
+    const pane = makeEl("section", "pane");
+
+    const header = makeEl("div", "pane-header");
+    const title = makeEl("span", "pane-title");
+    const settingsBtn = makeEl("button", "icon-btn", "⚙ Settings");
+    settingsBtn.type = "button";
+    settingsBtn.title = "Show or hide this chat's request parameters";
+    const debugBtn = makeEl("button", "icon-btn", "Debug");
+    debugBtn.type = "button";
+    debugBtn.title = "Show or hide this chat's request/response log";
+    const closeBtn = makeEl("button", "icon-btn close", "✕");
+    closeBtn.type = "button";
+    closeBtn.title = "Remove this chat";
+    header.appendChild(title);
+    header.appendChild(settingsBtn);
+    header.appendChild(debugBtn);
+    header.appendChild(closeBtn);
+
+    const summary = makeEl("div", "pane-summary");
+
+    const chat = createChat({
+      compact: true,
+      emptyText: "Send a message here, or use the shared box at the bottom to ask every chat at once.",
+      onSettingsChange: () => updateHeader(),
+    });
+
+    function updateHeader() {
+      title.textContent = chat.settings.model;
+      summary.textContent = summarize(chat.settings);
+    }
+    updateHeader();
+
+    const settingsWrap = makeEl("div", "pane-settings");
+    settingsWrap.appendChild(chat.settingsEl);
+
+    const debugWrap = makeEl("div", "pane-debug");
+    debugWrap.appendChild(chat.debugEl);
+
+    pane.appendChild(header);
+    pane.appendChild(summary);
+    pane.appendChild(settingsWrap);
+    pane.appendChild(chat.chatEl);
+    pane.appendChild(debugWrap);
+
+    function openSettings() {
+      pane.classList.add("show-settings");
+      settingsBtn.classList.add("active");
+    }
+
+    settingsBtn.addEventListener("click", () => {
+      const open = pane.classList.toggle("show-settings");
+      settingsBtn.classList.toggle("active", open);
+    });
+    debugBtn.addEventListener("click", () => {
+      const open = pane.classList.toggle("show-debug");
+      debugBtn.classList.toggle("active", open);
+    });
+    closeBtn.addEventListener("click", () => {
+      const index = panes.indexOf(entry);
+      if (index !== -1) panes.splice(index, 1);
+      pane.remove();
+      refreshCompareChrome();
+    });
+
+    const entry = { pane, chat, openSettings };
+    panes.push(entry);
+    grid.appendChild(pane);
+    refreshCompareChrome();
+    return entry;
+  }
+
+  addChatBtn.addEventListener("click", () => {
+    const entry = addPane();
+    if (entry) {
+      // A fresh pane opens with its settings visible - the first thing you
+      // want after adding one is to give it different parameters.
+      entry.openSettings();
+      entry.pane.scrollIntoView({ behavior: "smooth", inline: "end", block: "nearest" });
+    }
+  });
+
+  function broadcast() {
+    const text = broadcastInput.value.trim();
+    if (!text || !panes.length) return;
+    broadcastInput.value = "";
+    broadcastInput.style.height = "auto";
+    // Fire-and-forget per pane: each one runs its own request, so a slow
+    // model never holds up the others.
+    for (const entry of panes) entry.chat.send(text);
+  }
+
+  broadcastInput.addEventListener("input", () => {
+    broadcastInput.style.height = "auto";
+    broadcastInput.style.height = Math.min(broadcastInput.scrollHeight, 160) + "px";
+  });
+  broadcastInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      broadcast();
+    }
+  });
+  broadcastBtn.addEventListener("click", broadcast);
+
+  // -------------------------------------------------------- free models view
+  // Day 5. The same column layout as compare mode, pointed at OpenRouter -
+  // but a pane here is *only* a model. There is no settings form, no
+  // temperature, no system prompt: the request carries the message and the
+  // model id and nothing else, which is the whole point. When two columns
+  // disagree, the model is the only thing that can explain it.
+  //
+  // Only free (:free, priced 0/0) models are listed, and the server checks
+  // that again on every request, so this tab cannot spend money.
+  const freeGrid = document.getElementById("free-grid");
+  const freeEmpty = document.getElementById("free-empty");
+  const freeNotice = document.getElementById("free-notice");
+  const addFreeBtn = document.getElementById("add-free-btn");
+  const freeCount = document.getElementById("free-count");
+  const freeBroadcastInput = document.getElementById("free-broadcast-input");
+  const freeBroadcastBtn = document.getElementById("free-broadcast-btn");
+  const freePanes = [];
+  let FREE = null; // the catalogue, fetched once the first time the tab opens
+
+  function formatContext(tokens) {
+    if (!tokens) return null;
+    if (tokens >= 1000000) return (tokens / 1000000).toFixed(tokens % 1000000 ? 1 : 0) + "M ctx";
+    if (tokens >= 1000) return Math.round(tokens / 1000) + "K ctx";
+    return tokens + " ctx";
+  }
+
+  function maxFreePanes() {
+    return (FREE && FREE.max_compare_chats) || 5;
+  }
+
+  function refreshFreeChrome() {
+    const count = freePanes.length;
+    const ready = !!(FREE && FREE.models.length);
+    addFreeBtn.disabled = !ready || count >= maxFreePanes();
+    freeCount.textContent = ready ? `${count} of ${maxFreePanes()} models` : "";
+    freeEmpty.style.display = count ? "none" : "block";
+    freeBroadcastBtn.disabled = count === 0;
+    freeBroadcastInput.disabled = count === 0;
+  }
+
+  function showFreeNotice(html) {
+    freeNotice.innerHTML = html;
+    freeNotice.classList.toggle("hidden", !html);
+  }
+
+  // Adding a pane should give you something new to compare, so it defaults to
+  // the first model no other pane is already showing.
+  function nextFreeModel() {
+    const used = new Set(freePanes.map((entry) => entry.state.model));
+    const unused = FREE.models.find((model) => !used.has(model.id));
+    return (unused || FREE.models[0]).id;
+  }
+
+  function addFreePane(modelId) {
+    if (!FREE || !FREE.models.length || freePanes.length >= maxFreePanes()) return null;
+
+    const state = { model: modelId || nextFreeModel() };
+
+    const pane = makeEl("section", "pane");
+    const header = makeEl("div", "pane-header");
+
+    const select = makeEl("select", "pane-model-select");
+    select.title = "Which free model answers in this column";
+    for (const model of FREE.models) {
+      const option = makeEl("option", null, model.name);
+      option.value = model.id;
+      select.appendChild(option);
+    }
+    select.value = state.model;
+
+    const debugBtn = makeEl("button", "icon-btn", "Debug");
+    debugBtn.type = "button";
+    debugBtn.title = "Show or hide this column's request/response log";
+    const closeBtn = makeEl("button", "icon-btn close", "✕");
+    closeBtn.type = "button";
+    closeBtn.title = "Remove this column";
+
+    header.appendChild(select);
+    header.appendChild(debugBtn);
+    header.appendChild(closeBtn);
+
+    // The dropdown shows the human name ("NVIDIA: Nemotron 3 Ultra (free)");
+    // the line under it shows the id that actually goes on the wire, which is
+    // what you need when reading the debug log or quoting a result.
+    const summary = makeEl("div", "pane-summary");
+
+    const chat = createChat({
+      noSettings: true,
+      endpoint: "/api/free-chat",
+      buildBody: (text) => ({ message: text, model: state.model }),
+      emptyText: "Ask something here, or use the shared box at the bottom to ask every model at once.",
+    });
+
+    function updateSummary() {
+      const model = FREE.models.find((entry) => entry.id === state.model);
+      summary.textContent = [state.model, model && formatContext(model.context_length)]
+        .filter(Boolean).join(" · ");
+    }
+    updateSummary();
+
+    select.addEventListener("change", () => {
+      state.model = select.value;
+      updateSummary();
+    });
+
+    const debugWrap = makeEl("div", "pane-debug");
+    debugWrap.appendChild(chat.debugEl);
+
+    pane.appendChild(header);
+    pane.appendChild(summary);
+    pane.appendChild(chat.chatEl);
+    pane.appendChild(debugWrap);
+
+    debugBtn.addEventListener("click", () => {
+      const open = pane.classList.toggle("show-debug");
+      debugBtn.classList.toggle("active", open);
+    });
+    closeBtn.addEventListener("click", () => {
+      const index = freePanes.indexOf(entry);
+      if (index !== -1) freePanes.splice(index, 1);
+      pane.remove();
+      refreshFreeChrome();
+    });
+
+    const entry = { pane, chat, state, select };
+    freePanes.push(entry);
+    freeGrid.appendChild(pane);
+    refreshFreeChrome();
+    return entry;
+  }
+
+  addFreeBtn.addEventListener("click", () => {
+    const entry = addFreePane();
+    if (entry) entry.pane.scrollIntoView({ behavior: "smooth", inline: "end", block: "nearest" });
+  });
+
+  function freeBroadcast() {
+    const text = freeBroadcastInput.value.trim();
+    if (!text || !freePanes.length) return;
+    freeBroadcastInput.value = "";
+    freeBroadcastInput.style.height = "auto";
+    // One request per column, all in flight at once - a slow model never holds
+    // up the others. Note this spends one of the free tier's daily requests
+    // per column, not one per broadcast.
+    for (const entry of freePanes) entry.chat.send(text);
+  }
+
+  freeBroadcastInput.addEventListener("input", () => {
+    freeBroadcastInput.style.height = "auto";
+    freeBroadcastInput.style.height = Math.min(freeBroadcastInput.scrollHeight, 160) + "px";
+  });
+  freeBroadcastInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      freeBroadcast();
+    }
+  });
+  freeBroadcastBtn.addEventListener("click", freeBroadcast);
+
+  // Fetched on first open rather than at boot: the DeepSeek tabs must not wait
+  // on - or break because of - a second provider's catalogue.
+  async function initFreeView() {
+    try {
+      const res = await fetch("/api/free-models");
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || res.statusText);
+      FREE = body;
+    } catch (err) {
+      freeEmpty.textContent = "Could not load OpenRouter's free models.";
+      showFreeNotice("Could not load OpenRouter's model catalogue: " + err.message);
+      refreshFreeChrome();
+      return;
+    }
+
+    if (!FREE.models.length) {
+      freeEmpty.textContent = "OpenRouter is not serving any free models right now.";
+      refreshFreeChrome();
+      return;
+    }
+
+    // A missing key is worth saying out loud here: every send would otherwise
+    // just come back as an auth error in every column at once.
+    if (!FREE.key_configured) {
+      showFreeNotice(
+        "<code>OPENROUTER_API_KEY</code> is not set, so requests in this tab will fail. " +
+        "Add it to <code>.env</code> (see <code>.env.example</code>) and restart the server — " +
+        "get a key at <code>https://openrouter.ai/keys</code>.");
+    }
+
+    freeEmpty.textContent =
+      "No models yet. Add up to " + maxFreePanes() + " side by side, then ask them all the same question.";
+    // Two columns is the smallest thing worth comparing, same as compare mode.
+    addFreePane();
+    addFreePane();
+  }
+
+  // ------------------------------------------------------------------- tabs
+  const ACTIVE_VIEW_KEY = "deepseek-chat-view";
+  const VIEWS = ["single", "compare", "free"];
+  const initialized = {};
+
+  function setView(name) {
+    if (VIEWS.indexOf(name) === -1) name = "single";
+    for (const tab of document.querySelectorAll(".tab")) {
+      tab.classList.toggle("active", tab.dataset.view === name);
+    }
+    for (const view of VIEWS) {
+      document.getElementById(view + "-view").classList.toggle("active", view === name);
+    }
+    localStorage.setItem(ACTIVE_VIEW_KEY, name);
+
+    // Two chats is the smallest thing worth comparing, so seed a column view
+    // the first time it is opened - but only then, so closing panes down to
+    // zero stays a deliberate choice that survives tab switching.
+    if (initialized[name]) return;
+    initialized[name] = true;
+    if (name === "compare") {
+      addPane();
+      addPane();
+    } else if (name === "free") {
+      initFreeView();
+    }
+  }
+
+  for (const tab of document.querySelectorAll(".tab")) {
+    tab.addEventListener("click", () => setView(tab.dataset.view));
+  }
+
+  // ------------------------------------------------------------------- boot
+  async function boot() {
+    const res = await fetch("/api/config");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    CONFIG = await res.json();
+
+    mountSingleView();
+    setSingleDebugVisible(localStorage.getItem(DEBUG_VISIBLE_KEY) === "1");
+    refreshCompareChrome();
+    refreshFreeChrome();
+    setView(localStorage.getItem(ACTIVE_VIEW_KEY));
+  }
+
+  boot().catch((err) => {
+    console.error(err);
+    const banner = makeEl("div", "empty-state",
+      "Failed to load settings from the server: " + err.message);
+    document.getElementById("chat-inner").appendChild(banner);
+  });
+})();
+</script>
+
+</body>
+</html>
