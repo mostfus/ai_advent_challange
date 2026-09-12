@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+
+# saved conversations - this machine's chats, not the project's
+data/
+
+# vim/editor swap files - a swap of .env would carry its contents
+*.swp
+*.swo
+*~
+
+.DS_Store
