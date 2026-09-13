@@ -1,0 +1,11 @@
+{
+  "name": "day8-ui-tests",
+  "private": true,
+  "description": "Headless jsdom checks for the agent chat UI, its saved context and its token readout",
+  "scripts": {
+    "test": "node tests/ui-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0"
+  }
+}
