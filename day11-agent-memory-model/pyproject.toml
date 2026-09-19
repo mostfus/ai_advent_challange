@@ -1,0 +1,11 @@
+[project]
+name = "day11-agent-memory-model"
+version = "0.1.0"
+description = "An LLM agent with an explicit three-layer memory model - short-term, working and long-term - with a web GUI on top"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "python-dotenv==1.2.3",
+    "uvicorn[standard]>=0.52.4",
+]
