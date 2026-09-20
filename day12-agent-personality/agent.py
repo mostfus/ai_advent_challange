@@ -159,21 +159,25 @@ WORKING_PREFIX = (
     "has taken, and still in force:\n\n"
 )
 
-# Day 12, and the only block in a request that is not a statement about
-# anything. The four above all answer "what is true?" - this one answers "how
-# should you speak?", and the label has to say so, because a model handed
-# `Language: Russian` among a list of facts can reasonably read it as a fact
-# about the user rather than an instruction about the answer.
+# Day 12, and the only block in a request that is not a statement about the
+# past. The four above stand in for something - messages that were dropped, a
+# layer that was filed elsewhere. This one stands in for nothing: it is what
+# the user told the app about themselves before any of this was said.
 #
-# It says which block wins, too. The layers above can contain something that
-# looks like a preference - day 11 let people file `preference.style` and
-# pinned it to every request - and two blocks giving different orders with no
-# stated precedence is the one failure a prompt cannot recover from on its own.
+# The label carries two jobs, and both are load-bearing. It says **who wrote
+# this**, because a request now has two authors in it - whoever built the app
+# and whoever is using it - and the second must never read as though the first
+# said it. And it says **which block wins**, because the layers above can hold
+# something that looks like a preference (day 11 lets you file one and pin it
+# to every request), and two blocks giving different orders with no stated
+# precedence is the one failure a prompt cannot recover from on its own.
 PERSONALITY_PREFIX = (
-    "How this user wants to be answered. These are standing instructions from "
-    "the person you are talking to - not facts, and not something said in this "
-    "conversation. Follow them in every answer whatever is asked, and where "
-    "they disagree with anything above, these win:\n\n"
+    "--- Personalisation, written by the user ---\n"
+    "What the person you are talking to has told you about themselves, their "
+    "work, and how they want to be answered. They set this themselves: it was "
+    "not said in this conversation and it is not something you worked out. It "
+    "applies to every answer whatever is asked, and where it disagrees with "
+    "anything above, it wins:\n\n"
 )
 
 
@@ -320,7 +324,7 @@ class Agent:
             long-term     true everywhere, always
             working       true for this task
             summary|facts true for this conversation
-            personality   not true of anything - how to answer
+            personality   not about the past at all - who is asking
             the window    said in this conversation
 
         That order is the one thing here worth arguing about, so: it is the
@@ -334,22 +338,25 @@ class Agent:
         need a precedence and nowhere obvious to put it.
 
         Day 12's block is in that list and not in that argument, because it
-        is not a scope. The three above it say what is true; it says how to
-        speak, and the two cannot narrow each other. It goes **last** for a
-        different reason, and the reason is the same mechanism: an
-        instruction the user typed into a profile has to outrank a preference
-        the agent inferred and filed months ago, and later context is weighted
-        more heavily, so last is where "the declaration beats the inference"
-        is enforced rather than merely hoped for. Sitting closest to the
-        question is the same argument twice - it is also where a standing
-        instruction is most reliably obeyed.
+        is not a scope. The three above it say what is true; it says who is
+        asking and how they want to be answered, and the two cannot narrow
+        each other.
 
-        It does **not** go first, above everything, which is the other
-        plausible place for it: that would group it with the system prompt, and
-        the system prompt is the one thing here a user is not editing. Keeping
-        the developer's line at the top and the user's line at the bottom is
-        what makes the request readable as two different people having
-        configured it.
+        It goes **last** for a different reason, and the reason is the same
+        mechanism: what the user typed into a profile has to outrank a
+        preference the agent inferred and filed months ago, and later context
+        is weighted more heavily, so last is where "the declaration beats the
+        inference" is enforced rather than merely hoped for. Sitting closest
+        to the question is the same argument twice - it is also where a
+        standing instruction is most reliably obeyed.
+
+        The alternative was to join it onto the system prompt, one message
+        with the developer's half and the user's half in it, which reads
+        beautifully as "one configured agent" and loses exactly the
+        precedence above. It also loses the thing every other block here has:
+        its own message, so the debug panel can show what contributed what.
+        The prefix carries the framing instead, by naming its author - which
+        is cheaper than a placement and does the same job.
 
         They are three separate system messages rather than one joined block
         for the same reason they are three layers: so that the request in the

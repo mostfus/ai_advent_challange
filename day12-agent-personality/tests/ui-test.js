@@ -1624,31 +1624,56 @@ async function waitFor(fn, timeout = 15000) {
     reloadedTasks.some((t) => t.includes("closed")), reloadedTasks.join("  |  "));
 
   // ------------------------------------------------------------------
-  // Day 12: personality. Everything below is about one distinction - a
-  // profile is applied to a request and is written into no transcript - so
-  // most of these checks are of the form "the request changed and the stored
-  // conversation did not".
+  // Day 12: personalisation. Three fields the user writes - how they want
+  // answers written, the choices that hold whatever the topic, and who they
+  // are - joined onto the developer's system prompt under a label naming
+  // their author, and written into no transcript. Most of these checks are
+  // therefore of the form "the request changed and the stored conversation
+  // did not".
   // ------------------------------------------------------------------
   const openPersonality12 = () => {
     if (q12("#personality-popover").classList.contains("hidden")) {
       click12(q12("#personality-btn"));
     }
   };
+  const newChat12 = async () => {
+    click12(q12("#chats-btn"));
+    click12(q12("#new-chat-btn"));
+    await waitFor(() => q12("#chat-inner .msg-row") === null);
+  };
 
   check("the personality button is a sibling of the memory one, not a section in it",
     !!q12("#topbar #personality-btn") && !!q12("#personality-popover"));
   openPersonality12();
   await waitFor(() => qa12("#personality-body .prof-name").length > 1);
-
-  const profileNames = qa12("#personality-body .prof-name").map((n) => n.textContent.trim());
-  check("the app ships with profiles far enough apart to tell apart",
-    profileNames.some((n) => n === "Terse") && profileNames.some((n) => n === "Tutor"),
-    profileNames.join("  |  "));
-  check("and with none of them switched on - \"before\" is half the demonstration",
+  check("nothing is switched on to begin with - \"before\" is half the demonstration",
     q12("#personality-chip").textContent.trim() === "off" &&
     storedPersonality().active === null);
   check("off is a row you can choose, not the absence of a choice",
-    profileNames[0].includes("no personality"), profileNames[0]);
+    qa12("#personality-body .prof-name")[0].textContent.includes("no personality"));
+  // Two seeds, and the pair is the argument: one shows the shape of all three
+  // fields and is meant to be deleted, the other fills only `style` - the one
+  // field that is not about a particular person - and is meant to be used.
+  const seeded = storedPersonality().profiles;
+  check("it ships one profile to read and one to use",
+    seeded.length === 2 && seeded.map((p) => p.id).join(",") === "example,rational",
+    seeded.map((p) => p.id).join(", "));
+  check("and the usable one is style only, because style is the field that is not about you",
+    Object.keys(seeded[1].fields).join(",") === "style" &&
+    seeded[1].fields.style.includes("what the question leaves out"),
+    Object.keys(seeded[1].fields).join(", "));
+  click12(q12("#personality-btn"));
+
+  // ---- a new conversation is where it asks ----
+  await newChat12();
+  await waitFor(() => q12("#chat-inner .pers-invite:not(.hidden)"));
+  const invite = q12("#chat-inner .pers-invite");
+  check("a new chat offers to set personalisation up",
+    !invite.classList.contains("hidden") &&
+    invite.querySelector(".pers-invite-title").textContent.includes("who you are"),
+    invite.querySelector(".pers-invite-title").textContent);
+  check("and offers the profiles already saved, one click each",
+    Array.from(invite.querySelectorAll(".ghost-btn")).some((b) => b.textContent.trim() === "Example"));
 
   // ---- a request under no personality ----
   sentBodies.length = 0;
@@ -1658,117 +1683,168 @@ async function waitFor(fn, timeout = 15000) {
   await waitFor(() => !q12("#chat-inner .bubble.pending"));
   const plainRequest = qa12("#debug-panel .debug-entry").slice(-1)
     .map((e) => e.textContent).join("\n");
-  check("with no profile on, nothing about answering rides along",
-    !plainRequest.includes("How this user wants to be answered"));
+  check("with nothing set up, no personalisation rides along",
+    !plainRequest.includes("Personalisation, written by the user"));
+  check("and the invitation gets out of the way the moment anything is said",
+    q12("#chat-inner .pers-invite").classList.contains("hidden"));
 
-  // ---- switching one on ----
-  const terseRow = qa12("#personality-body .prof-entry")
-    .find((row) => {
-      const name = row.querySelector(".prof-name");
-      return name && name.textContent.trim() === "Terse";
-    });
-  check("every profile can be switched to from its own row", !!terseRow);
-  click12(terseRow.querySelector(".prof-pick"));
-  await waitFor(() => storedPersonality().active === "terse");
-  check("switching one on is one click and one field on disk",
-    storedPersonality().active === "terse", JSON.stringify(storedPersonality().active));
-  await waitFor(() => q12("#personality-chip").textContent.trim() === "Terse");
-  check("and the button says which one, without opening anything",
+  // ---- switching one on, from the invitation itself ----
+  await newChat12();
+  await waitFor(() => q12("#chat-inner .pers-invite:not(.hidden)"));
+  const useExample = Array.from(q12("#chat-inner .pers-invite").querySelectorAll(".ghost-btn"))
+    .find((b) => b.textContent.trim() === "Example");
+  click12(useExample);
+  await waitFor(() => storedPersonality().active === "example");
+  check("picking one in the invitation is the whole of switching it on",
+    storedPersonality().active === "example");
+  await waitFor(() => q12("#personality-chip").textContent.trim() === "Example");
+  check("and the button says which, without opening anything",
     q12("#personality-chip").classList.contains("on"),
     q12("#personality-chip").textContent.trim());
-  check("the panel shows the block exactly as the model will get it",
-    q12("#personality-body .prof-block").textContent.includes("Never:") &&
-    q12("#personality-body .prof-block").textContent.includes("apologise"));
+  await waitFor(() => q12("#chat-inner .pers-invite.compact"));
+  check("the invitation stops asking once it has an answer",
+    q12("#chat-inner .pers-invite.compact").textContent.includes("Example"));
 
   // Nothing about that click touched a conversation: a profile is applied at
   // request time, so there is nothing in any transcript for it to have
   // written. This is the day's whole claim, checked against the files.
   const storedFiles = fs.readdirSync(STORE_DIR).filter((n) => n.endsWith(".json"));
   const anyRecordMentions = storedFiles.some((name) =>
-    fs.readFileSync(path.join(STORE_DIR, name), "utf8").includes("personality"));
+    fs.readFileSync(path.join(STORE_DIR, name), "utf8").includes("voice assistant"));
   check("and no conversation record learned anything about it",
     !anyRecordMentions, storedFiles.length + " records");
 
-  // ---- the next request is answered under it ----
-  sentBodies.length = 0;
-  q12("#chat-inner .prompt-input").value = "and now?";
-  click12(q12("#chat-inner .send-btn"));
-  await waitFor(() => chatBodies().length === 1);
-  await waitFor(() => !q12("#chat-inner .bubble.pending"));
-  const terseRequest = qa12("#debug-panel .debug-entry").slice(-1)
-    .map((e) => e.textContent).join("\n");
-  check("the profile rides as its own labelled system message",
-    terseRequest.includes("How this user wants to be answered") &&
-    terseRequest.includes("state the conclusion first"));
+  // ---- where it lands in the request ----
+  // Read straight off the API rather than out of the debug panel: the claim
+  // is about the *shape* of `messages`, and counting roles in pretty-printed
+  // JSON on a page would be asserting on a rendering of the answer.
+  const probe = await (await fetch(BASE + "/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: "probe", conversation_id: "probe-12" }),
+  })).json();
+  const probeMessages = probe.debug.request.messages;
+  const carriers = probeMessages
+    .map((m, i) => ({ i: i, m: m }))
+    .filter((e) => (e.m.content || "").includes("Personalisation, written by the user"));
+  check("the personalisation rides as its own labelled system message",
+    carriers.length === 1 && carriers[0].m.role === "system" &&
+    carriers[0].i !== 0,
+    probeMessages.map((m) => m.role).join(", "));
   // Placement is the one thing about this block that is arguable, so it is
-  // the one thing worth asserting: after what the agent remembers, because a
-  // declaration has to outrank an inference, and before the transcript.
+  // the one thing worth asserting: the developer's line stays at the top, and
+  // the profile goes *after* everything the agent remembers, where a
+  // declaration outranks an inference.
+  check("the developer's line is still first, and is not what carries it",
+    probeMessages[0].content.includes("You are a helpful assistant") &&
+    !probeMessages[0].content.includes("Personalisation, written by the user"));
   check("and it sits after what the agent knows, where a declaration beats an inference",
-    terseRequest.indexOf("How this user wants to be answered") >
-    terseRequest.indexOf("What you know about this user"));
+    carriers[0].i > probeMessages
+      .findIndex((m) => (m.content || "").includes("What you know about this user")));
+  const sentBlock = carriers[0].m.content;
+  check("all three fields are in it, each under a label of its own",
+    sentBlock.includes("How they want answers written") &&
+    sentBlock.includes("Standing preferences") &&
+    sentBlock.includes("Who they are and what they are working on"));
+  check("including the one the agent could never have worked out",
+    sentBlock.includes("team of 3"));
 
-  // ---- editing it changes the next answer, not the last one ----
-  const editBtn = Array.from(terseRow.querySelectorAll(".prof-actions button"))
-    .find((b) => b.textContent.trim() === "Edit");
-  click12(editBtn);
+  // ---- the editor ----
+  openPersonality12();
+  await waitFor(() => qa12("#personality-body .prof-name").length > 1);
+  const exampleRow = qa12("#personality-body .prof-entry").find((row) => {
+    const name = row.querySelector(".prof-name");
+    return name && name.textContent.trim() === "Example";
+  });
+  check("every profile can be edited from its own row", !!exampleRow);
+  check("and says which of the three it has anything in",
+    Array.from(exampleRow.querySelectorAll(".prof-mark")).length === 3 &&
+    Array.from(exampleRow.querySelectorAll(".prof-mark.on")).length === 3);
+  click12(Array.from(exampleRow.querySelectorAll(".prof-actions button"))
+    .find((b) => b.textContent.trim() === "Edit"));
   await waitFor(() => q12("#personality-body .prof-form"));
-  const boxes = qa12("#personality-body .prof-form textarea");
-  check("editing opens the four fields, not one free-text box",
-    boxes.length === 4, boxes.length + " fields");
-  boxes[0].value = "Portuguese";
-  const saveBtn = Array.from(q12("#personality-body .prof-form-actions").querySelectorAll("button"))
-    .find((b) => b.textContent.trim() === "Save");
-  click12(saveBtn);
+  const labels = qa12("#personality-body .prof-form .prof-field label")
+    .map((l) => l.textContent.trim());
+  check("the form is three named fields, not one free-text box",
+    qa12("#personality-body .prof-form textarea").length === 3 &&
+    labels.join(",") === "Name,Style,Preferences,Context", labels.join(", "));
+
+  qa12("#personality-body .prof-form textarea")[2].value = "staff engineer\nteam of 9";
+  click12(Array.from(q12("#personality-body .prof-form-actions").querySelectorAll("button"))
+    .find((b) => b.textContent.trim() === "Save"));
   await waitFor(() => {
-    const record = storedPersonality();
-    const terse = record.profiles.find((p) => p.id === "terse");
-    return terse && terse.fields.language === "Portuguese";
+    const found = storedPersonality().profiles.find((p) => p.id === "example");
+    return found && (found.fields.context || "").includes("team of 9");
   });
   check("an edit is saved against the same id, so it stays the active one",
-    storedPersonality().active === "terse" &&
-    storedPersonality().profiles.find((p) => p.id === "terse").fields.language === "Portuguese");
+    storedPersonality().active === "example");
 
   // ---- a profile of your own ----
-  const newProfileBtn = Array.from(q12("#personality-body .prof-foot").querySelectorAll("button"))
-    .find((b) => b.textContent.includes("New profile"));
-  click12(newProfileBtn);
+  click12(Array.from(q12("#personality-body .prof-foot").querySelectorAll("button"))
+    .find((b) => b.textContent.includes("New profile")));
   await waitFor(() => q12("#personality-body .prof-form"));
   q12("#personality-body .prof-form input[type=text]").value = "Mine";
-  qa12("#personality-body .prof-form textarea")[0].value = "Russian";
-  const createBtn = Array.from(q12("#personality-body .prof-form-actions").querySelectorAll("button"))
-    .find((b) => b.textContent.trim() === "Create");
-  click12(createBtn);
+  qa12("#personality-body .prof-form textarea")[1].value = "only free APIs";
+  click12(Array.from(q12("#personality-body .prof-form-actions").querySelectorAll("button"))
+    .find((b) => b.textContent.trim() === "Create"));
   await waitFor(() => storedPersonality().profiles.some((p) => p.id === "mine"));
-  check("a profile of your own is a name and the same four fields",
-    storedPersonality().profiles.find((p) => p.id === "mine").fields.language === "Russian");
+  check("a profile of your own is a name and the same three fields",
+    storedPersonality().profiles.find((p) => p.id === "mine").fields.preferences
+      === "only free APIs");
   check("creating one does not switch to it - those are two decisions",
-    storedPersonality().active === "terse", storedPersonality().active);
+    storedPersonality().active === "example", storedPersonality().active);
+
+  // ---- the shape this day started with still reads ----
+  const legacy = await (await fetch(BASE + "/api/personality", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Legacy",
+      fields: {
+        tone: "blunt",
+        format: "bullet points",
+        language: "Russian",
+        constraints: "restate the question",
+      },
+    }),
+  })).json();
+  const folded = legacy.profiles.find((p) => p.id === "legacy");
+  // The old `constraints` box held things never to do, and said so only in
+  // its label. Folded flat, "restate the question" would become an
+  // instruction to do it - so the prohibition moves with the line.
+  check("and the old list of prohibitions is not inverted on the way",
+    !!folded && folded.fields.style.endsWith("never restate the question"),
+    folded && folded.fields.style);
+  check("a profile written under the first shape of this day folds into style",
+    !!folded && folded.fields.style.startsWith("Russian\nblunt\nbullet points") &&
+    !folded.fields.tone, JSON.stringify(folded && folded.fields));
 
   // ---- and it survives the page ----
   const dom14 = loadPage();
   const doc14 = dom14.window.document;
   await waitFor(() => doc14.querySelector("#chat-inner .chat-body"));
-  await waitFor(() => doc14.querySelector("#personality-chip").textContent.trim() === "Terse");
+  await waitFor(() => doc14.querySelector("#personality-chip").textContent.trim() === "Example");
   check("a reloaded page comes back under the same personality",
-    doc14.querySelector("#personality-chip").textContent.trim() === "Terse");
+    doc14.querySelector("#personality-chip").textContent.trim() === "Example");
 
-  // ---- deleting the active one switches personality off ----
+  // ---- deleting the active one switches personalisation off ----
   doc14.querySelector("#personality-btn")
     .dispatchEvent(new dom14.window.MouseEvent("click", { bubbles: true }));
   await waitFor(() => doc14.querySelectorAll("#personality-body .prof-entry").length > 1);
-  const liveTerse = Array.from(doc14.querySelectorAll("#personality-body .prof-entry"))
+  const liveExample = Array.from(doc14.querySelectorAll("#personality-body .prof-entry"))
     .find((row) => {
       const name = row.querySelector(".prof-name");
-      return name && name.textContent.trim() === "Terse";
+      return name && name.textContent.trim() === "Example";
     });
-  const deleteBtn = Array.from(liveTerse.querySelectorAll(".prof-actions button"))
-    .find((b) => b.textContent.trim() === "Delete");
-  deleteBtn.dispatchEvent(new dom14.window.MouseEvent("click", { bubbles: true }));
-  await waitFor(() => !storedPersonality().profiles.some((p) => p.id === "terse"));
-  check("deleting the active profile leaves personality off, not somebody else's",
+  Array.from(liveExample.querySelectorAll(".prof-actions button"))
+    .find((b) => b.textContent.trim() === "Delete")
+    .dispatchEvent(new dom14.window.MouseEvent("click", { bubbles: true }));
+  await waitFor(() => !storedPersonality().profiles.some((p) => p.id === "example"));
+  check("deleting the active profile leaves personalisation off, not somebody else's",
     storedPersonality().active === null, JSON.stringify(storedPersonality().active));
   await waitFor(() => doc14.querySelector("#personality-chip").textContent.trim() === "off");
-  check("and the button says so", !doc14.querySelector("#personality-chip").classList.contains("on"));
+  check("and the button says so",
+    !doc14.querySelector("#personality-chip").classList.contains("on"));
 
   console.log(failures ? `\n${failures} FAILURES` : "\nAll checks passed");
   stopServer();

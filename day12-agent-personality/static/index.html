@@ -13,6 +13,10 @@
     --text-muted: #6b6b76;
     --accent: #2f6fed;
     --accent-text: #ffffff;
+    /* Day 12. The widest thing drawn inside a transcript, and therefore what
+       the chat column is sized from - see `#chat-inner`. Declared here rather
+       than on the card so the two cannot drift apart. */
+    --invite-width: 620px;
     --bubble-user: #2f6fed;
     --bubble-user-text: #ffffff;
     --bubble-assistant: #ececef;
@@ -139,10 +143,18 @@
     min-height: 0;
   }
 
-  /* Centered chat column: roughly a third of the viewport width, with sane
-     bounds so it stays readable on both narrow and very wide windows. */
+  /* Centered chat column: a share of the viewport width, with sane bounds so
+     it stays readable on both narrow and very wide windows.
+     
+     The lower bound is not a number picked by eye. It is `--invite-width` -
+     the widest block a transcript ever draws, day 12's personalisation card -
+     plus the transcript's own gutters and a little air, so that card is never
+     the reason the column has to scroll. Day 12 also put a fourth button in
+     the topbar, and `.icon-btn` does not shrink; at the old 420px the bar ran
+     off the end of its own column as soon as a profile with a long name was
+     switched on. Both symptoms are the same cause and take the same fix. */
   #chat-inner {
-    width: clamp(420px, 34vw, 760px);
+    width: clamp(calc(var(--invite-width) + 80px), 40vw, 860px);
     max-width: 100%;
     margin: 0 auto;
     flex: 1;
@@ -258,9 +270,18 @@
     background: var(--panel-bg);
   }
 
-  /* Pushes the settings button to the far end of the bar. */
+  /* Pushes the settings button to the far end of the bar. `min-width: 0` is
+     what decides who loses when the bar runs out of room: the buttons carry
+     `flex-shrink: 0`, so without it the title holds its full width and pushes
+     them off the end instead of being truncated itself. Below the column's
+     own minimum - a narrow window, where `max-width: 100%` takes over - that
+     is the difference between a cramped bar and an unusable one. */
   #topbar h2 {
     flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 15px;
     margin: 0;
     font-weight: 600;
@@ -1733,6 +1754,90 @@
      on purpose: this is the one readout in the app that answers "what is
      actually being sent", and a prettified version of it would be a second
      opinion rather than an answer. */
+  /* Which of the three fields a profile has anything in. Three chips, always
+     all three, the empty ones greyed - the absence is the information, and a
+     list that only shows what is filled cannot show what is not. */
+  .prof-filled { display: flex; gap: 4px; margin-top: 3px; }
+
+  .prof-mark {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 0 5px;
+    color: var(--text-muted);
+    opacity: 0.45;
+  }
+
+  .prof-mark.on { opacity: 1; border-color: var(--accent); color: var(--accent); }
+
+  /* The invitation drawn in an empty chat. In the transcript rather than over
+     it: a modal is a thing to dismiss, and this is a thing to ignore. */
+  .pers-invite {
+    margin: 0 auto 14px;
+    max-width: var(--invite-width);
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel-bg);
+  }
+
+  .pers-invite.hidden { display: none; }
+
+  .pers-invite-title { font-size: 13.5px; font-weight: 600; margin-bottom: 4px; }
+
+  .pers-invite-body {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 10px;
+  }
+
+  .pers-invite-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .pers-invite-actions .primary-btn { width: auto; padding: 5px 14px; font-size: 12px; }
+  .pers-invite-actions .ghost-btn { width: auto; padding: 5px 10px; font-size: 12px; }
+
+  .pers-invite-link {
+    margin-left: auto;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 11.5px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .pers-invite-link:hover { color: var(--accent); }
+
+  /* Already configured: one line saying under which personality the answers
+     are about to arrive, which is all an empty chat needs to be told. */
+  .pers-invite.compact { padding: 8px 12px; }
+
+  .pers-invite-line {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  .pers-invite-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+
+  .pers-invite-sum {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
   .prof-block {
     margin: 4px 0 0;
     padding: 8px 10px;
@@ -1878,7 +1983,7 @@
       <div id="personality-anchor">
         <button type="button" class="icon-btn" id="personality-btn"
                 aria-expanded="false" aria-controls="personality-popover"
-                title="How you want to be answered - applied to every chat">
+                title="Who you are, what you are working on, and how you want to be answered">
           <span>Personality</span><span id="personality-chip" class="prof-chip">off</span>
         </button>
 
@@ -2908,6 +3013,107 @@
       "Send a message to start. Paste or type text of any length — Enter sends, Shift+Enter adds a line break.");
     transcript.appendChild(emptyState);
 
+    // Day 12. A new conversation is the moment to ask, because it is the only
+    // moment at which nothing is lost by answering: the profile is applied
+    // when a request is assembled, so configuring it before the first
+    // question and configuring it after the fourth differ only in how many
+    // answers came back wrong first.
+    //
+    // It is drawn in the transcript rather than as a modal, and it goes away
+    // the moment anything is said. A dialog would be a thing to dismiss; this
+    // is a thing to ignore.
+    //
+    // Only in the single view: the compare columns are five agents being held
+    // against each other, and five copies of the same invitation is not five
+    // invitations, it is noise.
+    const invite = makeEl("div", "pers-invite hidden");
+    let inviteDismissed = false;
+    transcript.appendChild(invite);
+
+    function renderInvite() {
+      const empty = emptyState.style.display !== "none";
+      if (view !== "single" || !empty || inviteDismissed || !CONFIG.personality_fields) {
+        invite.classList.add("hidden");
+        return;
+      }
+      invite.classList.remove("hidden");
+      invite.innerHTML = "";
+      const active = (personalityState.profiles || [])
+        .find((entry) => entry.id === personalityState.active);
+
+      if (active) {
+        // Already configured. Not an invitation any more - a statement of
+        // which personality the answers are about to come back under, which
+        // is worth one line at the top of an empty chat and no more.
+        invite.classList.add("compact");
+        const line = makeEl("div", "pers-invite-line");
+        line.appendChild(makeEl("span", "pers-invite-label", "Personalised as"));
+        line.appendChild(makeEl("strong", null, active.name || active.id));
+        if (active.summary) line.appendChild(makeEl("span", "pers-invite-sum", active.summary));
+        const change = makeEl("button", "pers-invite-link", "Change");
+        change.type = "button";
+        change.addEventListener("click", (e) => { e.stopPropagation(); openPersonality(false); });
+        line.appendChild(change);
+        invite.appendChild(line);
+        return;
+      }
+
+      invite.classList.remove("compact");
+      invite.appendChild(makeEl("div", "pers-invite-title", "Tell the agent who you are"));
+      invite.appendChild(makeEl("div", "pers-invite-body",
+        "Three things it cannot work out from the question: how you want answers " +
+        "written, the choices you have already made that hold whatever the topic, " +
+        "and who you are and what you are building. It goes into every request, " +
+        "in every chat, until you change it."));
+
+      const actions = makeEl("div", "pers-invite-actions");
+      const setUp = makeEl("button", "primary-btn", "Set it up");
+      setUp.type = "button";
+      setUp.addEventListener("click", (e) => { e.stopPropagation(); openPersonality(true); });
+      actions.appendChild(setUp);
+
+      // Saved profiles, one click each. Somebody who has already written one
+      // is not being asked to write another - they are being asked which.
+      for (const entry of personalityState.profiles || []) {
+        const use = makeEl("button", "ghost-btn", entry.name || entry.id);
+        use.type = "button";
+        use.title = entry.summary || "";
+        use.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            absorbPersonality(await API.activateProfile(entry.id));
+          } catch (err) {
+            console.error(err);
+          }
+        });
+        actions.appendChild(use);
+      }
+
+      const not = makeEl("button", "pers-invite-link", "Not now");
+      not.type = "button";
+      not.addEventListener("click", (e) => {
+        e.stopPropagation();
+        inviteDismissed = true;
+        renderInvite();
+      });
+      actions.appendChild(not);
+      invite.appendChild(actions);
+    }
+
+    // Shown exactly when the empty state is, so there is one answer to "is
+    // this chat empty" rather than two that can disagree.
+    function showEmpty(visible) {
+      emptyState.style.display = visible ? "block" : "none";
+      renderInvite();
+    }
+
+    personalityInvites.add(renderInvite);
+    // Drawn once here as well as on every change, because a chat created
+    // after boot - the "+ New chat" button - is never handed a message list
+    // and so nothing else would ever call it. That is exactly the chat this
+    // card exists for.
+    renderInvite();
+
     const composer = makeEl("div", "composer");
     const promptInput = makeEl("textarea", "prompt-input");
     promptInput.rows = 1;
@@ -3002,7 +3208,7 @@
 
     function addBubble(role, text, opts) {
       opts = opts || {};
-      emptyState.style.display = "none";
+      showEmpty(false);
 
       const row = makeEl("div", "msg-row " + role);
       const bubble = makeEl("div", "bubble" + (opts.error ? " error" : "") + (opts.pending ? " pending" : ""), text);
@@ -3026,7 +3232,7 @@
     // nothing - but it is not a message: it is not stored, not replayed, and
     // gone on the next reload, by which time the memory panel is the record.
     function addReceipt(text, isError) {
-      emptyState.style.display = "none";
+      showEmpty(false);
       const row = makeEl("div", "mem-receipt" + (isError ? " error" : ""), text);
       transcript.appendChild(row);
       transcript.scrollTop = transcript.scrollHeight;
@@ -3151,7 +3357,8 @@
     function drawMessages(messages) {
       transcript.innerHTML = "";
       transcript.appendChild(emptyState);
-      emptyState.style.display = (messages && messages.length) ? "none" : "block";
+      transcript.appendChild(invite);
+      showEmpty(!(messages && messages.length));
       for (const message of messages || []) {
         addBubble(message.role === "user" ? "user" : "assistant", message.content,
           { error: !!message.error, quiet: true });
@@ -3340,7 +3547,8 @@
       }
       transcript.innerHTML = "";
       transcript.appendChild(emptyState);
-      emptyState.style.display = "block";
+      transcript.appendChild(invite);
+      showEmpty(true);
       savedCount = 0;
       factHighlight = null;
       notifyContext();
@@ -4451,6 +4659,18 @@
       profile
         ? (profile.summary || "Nothing filled in yet - this one would send nothing.")
         : "Answers on the agent's default configuration."));
+    // Which of the three are filled in. A profile with only a style in it is
+    // a different thing from a finished one, and a truncated summary line
+    // cannot tell you which you are looking at.
+    if (profile) {
+      const marks = makeEl("div", "prof-filled");
+      for (const spec of personalityFields()) {
+        const on = (profile.filled || []).indexOf(spec.id) !== -1;
+        marks.appendChild(makeEl("span", "prof-mark" + (on ? " on" : ""),
+          (spec.label || spec.id).toLowerCase()));
+      }
+      body.appendChild(marks);
+    }
     pick.appendChild(body);
     pick.addEventListener("click", async () => {
       try {
@@ -4500,8 +4720,10 @@
     head.appendChild(makeEl("span", "layer-writer", "You"));
     personalityBody.appendChild(head);
     personalityBody.appendChild(makeEl("div", "layer-hint",
-      "How you want to be answered. Sent whole with every request, in every " +
-      "chat, whatever is asked - it is not recalled the way a memory is, " +
+      "What you have told the agent about yourself, your work and your taste. " +
+      "Sent whole with every request, in every chat, whatever is asked - " +
+      "after everything the agent remembers, because what you declared has " +
+      "to outrank what it inferred. It is not recalled the way a memory is, " +
       "because it is relevant to everything. Nothing here was learned and " +
       "nothing here can be wrong; it can only stop being what you want."));
 
@@ -4542,6 +4764,7 @@
     const name = activeProfileName();
     personalityChip.textContent = name || "off";
     personalityChip.classList.toggle("on", Boolean(name));
+    renderPersonalityInvites();
   }
 
   function setPersonalityOpen(open) {
@@ -4562,6 +4785,28 @@
   });
 
   personalityPopover.addEventListener("click", (e) => e.stopPropagation());
+
+  // Opened from somewhere other than the button - the invitation drawn in an
+  // empty chat. `create` is what makes it an answer to "set it up" rather
+  // than "here is a list": a person who has just said yes should land in the
+  // form, not in a panel with a button in it.
+  function openPersonality(create) {
+    setSettingsOpen(false);
+    setChatsOpen(false);
+    setMemoryOpen(false);
+    if (create) editingProfile = "new";
+    setPersonalityOpen(true);
+    refreshPersonality();
+  }
+
+  // Every empty chat draws its own invitation, and they all redraw when the
+  // profiles change - switching one on in the panel has to take the card down
+  // in the chat behind it, or the app is asking twice for something it has.
+  const personalityInvites = new Set();
+
+  function renderPersonalityInvites() {
+    for (const draw of personalityInvites) draw();
+  }
 
   function maxPanes() {
     return CONFIG.max_compare_chats;

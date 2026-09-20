@@ -6,7 +6,7 @@ Day 7 gave the agent a memory by replaying the transcript into every request. Da
 
 Day 11 asks a question none of them did. All of the above is about **one conversation**: how much of it fits, what stands in for the rest, which fork of it you are in. Start a new chat and every last bit of it is gone — the agent meets you again as a stranger, and you type your name for the fourth time. So that day is about the other axis: **how long a thing stays true, and who is allowed to see it.**
 
-Day 12 asks the question all eleven of them kept answering by accident. Every one is about what the agent **knows** — how much of it, for how long, carried how far. None is about how it **talks**, and the two had quietly ended up in the same places: a reasoning style in the chat's settings since day 3, `preference.style: no apologies` filed into a memory layer since day 10. So this day pulls those apart and gives the second one an object of its own, with a switch on it.
+Day 12 asks the question all eleven of them kept answering by accident. Every one is about what the agent **knows** — how much of it, for how long, carried how far. None is about **who is asking**, and the two had quietly ended up in the same places: a reasoning style in the chat's settings since day 3, `preference.style: no apologies` filed into a memory layer since day 10. So this day pulls those apart and gives the second one an object of its own, with a switch on it — three fields covering how you want answers written, the choices you have already settled whatever the topic, and who you are and what you are building.
 
 ```
 CONTEXT                                                      sticky facts ▸
@@ -34,75 +34,132 @@ BRANCH   [ main 54 ]  [ plan A 62 ]  [ plan B 58 ]     ⚑ Checkpoint   ⑂ Bran
 ```
 
 ```
-PERSONALITY  ⟨ Terse ⟩                                                 YOU ▸
+PERSONALITY  ⟨ Work ⟩                                                  YOU ▸
 
-  ○  — no personality —     answers on the agent's default configuration
-  ●  Terse                  direct; at most five sentences; never apologise
-  ○  Tutor                  numbered steps, then the answer
-  ○  Russian reviewer       Russian; blunt; the weakest point first
+  ○  — no personality —    answers on the agent's default configuration
+  ●  Work                  STYLE  PREFERENCES  CONTEXT
+  ○  Weekend project       STYLE  preferences  CONTEXT
 
   SENT WITH EVERY REQUEST
-    Tone: plain and direct; state the conclusion first
-    Format: at most five sentences, unless asked for more
-    Never:
-    - apologise
-    - open with a preamble
+    How they want answers written:
+    - in Russian, short and direct, no preamble
+    Standing preferences, whatever the topic:
+    - Python + FastAPI, minimum dependencies, free APIs only
+    Who they are and what they are working on:
+    - senior developer, voice assistant, team of 3, two weeks left
 ```
 
 **Nothing is deleted, and nothing is copied.** The transcript stays whole on disk, exactly as day 7 left it. What changes is which part of it goes up the wire, what stands in for the part that does not — and, now, *which* transcript it is.
 
-## Personality: what you declared, as against what it learned
+## Personalisation: what you declared, as against what it learned
 
-The obvious objection to this day is that it already exists. Day 11 will happily hold `preference.style: no apologies, no preamble` in the long-term layer, star it so that it rides on every single request, and carry it into every chat you open. That *is* personalisation, by any reasonable reading. So what is being added?
+The obvious objection to this day is that it already exists. Day 11 will happily hold `preference.style: no apologies` in the long-term layer, star it so that it rides on every single request, and carry it into every chat you open. That *is* personalisation, by any reasonable reading. So what is being added?
 
 The answer is a line those eleven days never had to draw, and it is not about lifetime. Day 11 sorts memories by asking **when should this be forgotten?**, which is a good question and sorts facts perfectly. It cannot sort this, because the difference here is **refutability**:
 
-|  | Memory | Personality |
+|  | Memory | Personalisation |
 |---|---|---|
 | Where it came from | the agent noticed it | you declared it |
 | Can it be wrong? | **yes** — "my name is not Maksim" | **no** — it can only stop being what you want |
 | How it reaches a request | scored against the question, a few sent (`memory.recall`) | sent whole, unconditionally, every time |
-| How big does it get | unbounded, hence the recall | four fields, by design |
+| How big does it get | unbounded, hence the recall | three fields, by design |
 | What a failure looks like | the agent did not know | the agent knew and did it anyway |
-| How you undo it | file a correction over it | delete it, or switch profiles |
+| How you undo it | file a correction over it | edit it, or switch profiles |
 
 Every row follows from the one above it. A memory can be wrong, so it needs a source and a way to correct it; it accumulates, so it needs recall. A profile cannot be wrong, so it needs neither — **`personality.py` imports nothing from `memory.py`, and there is no scoring in it at all.** That absence is the clearest statement of the difference the codebase can make.
 
+### Three fields, and what each is for
+
+```
+Style          in Russian
+               short and direct, no preamble
+               code first, explanation after
+
+Preferences    Python + FastAPI, no heavy frameworks
+               minimum dependencies
+               free APIs only
+
+Context        senior developer
+               building a voice assistant
+               team of 3
+               deadline in two weeks
+```
+
+They are three because a person configuring an assistant is answering three different questions, and the answers behave differently once written down:
+
+- **Style** is taste. How an answer should read — language, length, tone, what never to do. A model drifting here is not a bug; a model answering in the wrong language is.
+- **Preferences** are choices already made, and they hold *whatever the topic*. Not "use FastAPI for this endpoint" — "this is the stack, these are the rules, do not propose around them". They are the closest thing here to a specification, and the easiest to check an answer against.
+- **Context** is who is asking and what for, and it is the field that makes the whole thing worth building. "Senior developer" changes what may be skipped. "Team of 3" changes what is worth automating. "Deadline in two weeks" changes which of two designs gets recommended. None of that is inferable from the question, none of it is worth retyping into every chat, and none of it is a *memory* — nothing there was learned, and nothing there can be contradicted by something said later.
+
+One free-text field would be strictly more expressive. It would also be, precisely, a second custom system prompt — the duplication this day exists to remove — and, worse, an empty box gets nothing out of anybody. Three labelled prompts do: a box that says *who you are and what you are working on* is how "senior dev, voice assistant, team of 3" gets typed at all.
+
+An earlier cut of this day had four fields — `language`, `tone`, `format`, `constraints` — which on inspection were one question asked four ways. They fold into **Style** on read, so a profile written under the old shape still works; `constraints` was a list of things *never to do*, so each of its lines gets "never" put back on it as it moves, because a migration that silently inverts four of somebody's rules is worse than one that drops them.
+
 ### The system prompt stays exactly where it was
 
-The other tempting move is to replace `system_prompt` with this. It is the same slot in the request, it holds free text, the UI has had a custom-prompt box since day 3 — so a second free-text box about behaviour sitting underneath the first one would be an obvious duplication.
+The other tempting move is to replace `system_prompt` with this. It is the same slot in the request, it holds free text, the UI has had a custom-prompt box since day 3.
 
 It stays anyway, and the reason is ownership rather than mechanism:
 
 ```
-[system]  "You are a helpful assistant."        ← set by whoever built the app
+[system]  You are a helpful assistant.               ← whoever built the app
 …
-[system]  Tone: plain and direct                ← set by whoever is using it
-          Never: apologise
+[system]  --- Personalisation, written by the user ---
+          … where it disagrees with anything above, it wins:
+
+          How they want answers written:
+          - in Russian, short and direct
+          Standing preferences, whatever the topic:
+          - Python + FastAPI, free APIs only
+          Who they are and what they are working on:
+          - senior developer, team of 3, two weeks left
 ```
 
-The first line is the developer's. It is where an identity, a safety framing and, one day, instructions about tools would live, and none of that is a user preference — a user who can empty that box is a user who can empty *those*. The second is yours, and the app has to be able to hand it to you as something editable without also handing over the first. Merging them would make that impossible and would buy one field.
+The first line is the developer's. It is where an identity, a safety framing and, one day, instructions about tools would live, and none of that is a user preference — a user who can empty that box is a user who can empty *those*. The second block is yours, and the app has to be able to hand it to you as something editable without also handing over the first. Merging them would make that impossible and would buy one field.
 
-What did change is four words. `LONG_TERM_PREFIX` used to introduce the long-term layer as "what you know about this user **and how they want to be answered**". It no longer says the second half, because a request that describes two of its blocks the same way is asking the model to work out which one meant it.
+Which makes the label load-bearing rather than decorative. A request now has two authors in it, they are not equally binding, and the second must never read as though the first said it — so the block says who wrote it, in the first line, before anything else.
 
-### Four fields, not one box
+What else changed is four words. `LONG_TERM_PREFIX` used to introduce the long-term layer as "what you know about this user **and how they want to be answered**". It no longer says the second half, because a request that describes two of its blocks the same way is asking the model to work out which one meant it.
 
-A profile is exactly four things:
+### Where it sits, and why last
 
 ```
-Language      Russian
-Tone          blunt and critical; disagree when there is reason to
-Format        bullet points; the weakest point first
-Never do      compliment the question
-              hedge a judgement you can justify
+[system]  the role                                        ← the developer's
+[system]  LONG-TERM — what you know about this user
+[system]  WORKING — what this task has established
+[system]  summary | facts — what fell out of this chat's window
+[system]  PERSONALISATION — who is asking, and how                 ← yours
+          the window, verbatim
+[user]    the question
 ```
 
-One free-text field would be strictly more expressive. It would also be, precisely, a second custom system prompt — the duplication above, rebuilt one screen to the left. Named fields buy two things a blank box does not:
+The three memory blocks are ordered widest-scope-first, because that is the order of narrowing (see below). This one is not in that argument at all: it is not a scope, and "who is asking" cannot narrow "what is true".
 
-- **A form people fill in.** Nobody writes anything useful into an empty textarea labelled "preferences". Four labelled prompts with placeholders get filled in.
-- **Two fields that can be checked.** `Language` and `Format` are concrete enough that an answer can be held up against them afterwards. "Tone" is not, and is honestly the softest of the four — a model drifting on tone is not a bug, while a model answering in English under `Language: Russian` is.
+It goes **last** for a different reason that happens to use the same mechanism. The layers above can still hold something that reads as a preference — day 11 lets you file one and pin it to every request — and two blocks giving different orders with no stated precedence is the one failure a prompt cannot recover from on its own. Later context is weighted more heavily, so last is where *the declaration beats the inference* is enforced rather than hoped for. Sitting closest to the question is the same argument twice: it is also where a standing instruction is most reliably obeyed.
 
-They are ordered hardest-to-softest in intent and shown in that order: language is unmistakable when broken, `Never do` is a list of faults, tone is taste.
+The alternative was to join it onto the system prompt — one message carrying the developer's half and the user's half — which reads beautifully as *one configured agent* and gives up exactly that precedence. It also gives up the thing every other block here has: its own message, so the debug panel can show what contributed what. The label does the framing instead, by naming its author in its first line, which is cheaper than a placement and does the same job.
+
+### It asks at the start of a new chat
+
+An empty conversation is the only moment at which answering costs nothing — the profile is applied when a request is assembled, so configuring it before the first question and configuring it after the fourth differ only in how many answers came back wrong first. So that is where it asks:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Tell the agent who you are                                  │
+│  Three things it cannot work out from the question: how you  │
+│  want answers written, the choices you have already made     │
+│  that hold whatever the topic, and who you are and what you  │
+│  are building. It goes into every request, in every chat.    │
+│                                                              │
+│  [ Set it up ]  [ Work ]  [ Weekend project ]      Not now   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Drawn in the transcript rather than over it, and gone the moment anything is said. A dialog is a thing to dismiss; this is a thing to ignore. The saved profiles are on it because somebody who has already written one is not being asked to write another — they are being asked *which*.
+
+Once a profile is on, the card stops asking and becomes one line — `Personalised as Work · …  Change` — because at that point the only thing an empty chat needs to be told is which personality the answers are about to arrive under.
+
+It appears in the single view only. The compare columns are five agents being held against each other, and five copies of the same invitation is not five invitations, it is noise.
 
 ### Profiles, and why switching is one click with no warning
 
@@ -112,46 +169,30 @@ The part worth stating plainly is what switching does *not* do. **Nothing a prof
 
 - switching changes **every** chat on the machine, from the next message onwards, including the ones already open;
 - there is no such thing as a message that "was sent under the old profile" for anything to stay consistent with;
-- and deleting the active profile leaves personality **off**, rather than silently falling back to another one.
+- and deleting the active profile leaves personalisation **off**, rather than silently falling back to another one.
 
 Which is why it can be a single click with nothing to confirm. The worst outcome is an agent that answers plainly until you say otherwise.
 
-Creating a profile does not activate it, and editing one keeps its id — renaming "Terse" to "Very terse" must not detach it from the active pointer, or renaming the profile you are using would quietly switch personality off.
-
-### Where it sits in a request, and why last
-
-```
-[system]  the role                                            ← the developer's
-[system]  LONG-TERM — what you know about this user
-[system]  WORKING — what this task has established
-[system]  summary | facts — what fell out of this chat's window
-[system]  PERSONALITY — how this user wants to be answered     ← yours
-          the window, verbatim
-[user]    the question
-```
-
-The three memory blocks are ordered widest-scope-first, because that is the order of narrowing (see below). This one is not in that argument at all: it is not a scope, and "how to speak" cannot narrow "what is true".
-
-It goes **last** for a different reason that happens to use the same mechanism. The layers above can still contain something that looks like a preference — day 11 lets you file one and star it — and two blocks giving different orders with no stated precedence is the one failure a prompt cannot recover from on its own. Later context is weighted more heavily, so last is where *the declaration beats the inference* is enforced rather than hoped for. Sitting closest to the question is the same argument twice: it is also where a standing instruction is most reliably obeyed.
-
-It does **not** go first, above everything, which is the other plausible place. That would group it with the system prompt, and the system prompt is the one line here a user is not editing. Developer's line at the top, user's line at the bottom: the request reads as two different people having configured it.
+Creating a profile does not activate it, and editing one keeps its id — renaming "Work" to "Day job" must not detach it from the active pointer, or renaming the profile you are using would quietly switch personalisation off.
 
 ### What it costs
 
-A profile is sent whole with every request — roughly 120 tokens at the length the fields allow, on every single message, forever. That is a standing cost rather than an occasional one, and it is the opposite trade from a memory layer, which is paid for only when it matches the question.
+A profile is sent whole with every request — roughly 300–400 tokens at the length the fields allow, on every single message, forever. That is a standing cost rather than an occasional one, and it is the opposite trade from a memory layer, which is paid for only when it matches the question.
 
 It is also why the fields are capped. The cap is not a backstop against abuse; it is the design. A profile that needs a fifth paragraph has stopped being a preference and become a prompt, and there is already a box for those, one line higher up.
 
 ### Checking it
 
 ```
-1. Ask anything with personality off. Keep the answer.
-2. Switch on "Terse". Ask the same thing.        → shorter, no preamble
-3. Switch on "Russian reviewer". Ask it again.   → Russian, and it argues
-4. Open the debug panel on any of those requests.
+1. Ask a design question with personalisation off. Keep the answer.
+2. Fill in Context: "senior developer, team of 3, deadline in two weeks".
+3. Ask the same question.          → it stops explaining what you know,
+                                      and weighs the answer against the time
+4. Add Preferences: "free APIs only, minimum dependencies".
+5. Ask it again.                   → the paid service it recommended is gone
 ```
 
-The block is there as its own labelled system message, after everything the agent remembers and before the transcript. Then open `data/conversations/single.json` and search it for any of those words: they are not in it, and never were.
+Then open the debug panel on any of those requests: the block is there as its own labelled system message, after everything the agent remembers and before the transcript. Then open `data/conversations/single.json` and search it for any of those words — they are not in it, and never were.
 
 ## Two decisions, not four
 
@@ -233,7 +274,7 @@ That last rule earns its place. Keys are English by convention (`decision.schema
 [user]    the question
 ```
 
-(Day 12 adds one more between the last block and the window — the personality, which is not a scope and is not in the argument that follows. See [above](#where-it-sits-in-a-request-and-why-last).)
+(Day 12 adds one more between the last block and the window — the personalisation, which is not a scope and is not in the argument that follows. See [above](#where-it-sits-and-why-last).)
 
 Widest first, because that is the order of narrowing and it puts each block *after* everything it might need to contradict. A task that has settled on English is stated after a user who generally prefers Russian; this conversation's own facts are stated after both. Models weight later context more heavily, so the narrower scope wins by construction rather than by a precedence rule written in prose that something would have to enforce.
 
@@ -392,7 +433,7 @@ A fork **inherits a copy** of what its parent knew at the fork — the fact bloc
 | **— no personality —** | kept | kept | kept | kept | kept | kept, not sent |
 | **Delete** a profile | kept | kept | kept | kept | kept | that one gone |
 
-The bottom two rows are day 12's, and they are the only pair in the table that does the same thing to different depths: switching personality off is `Close a task` for the thing you declared — nothing is deleted, it simply stops being sent — while deleting a profile is `✕` on an item. Everything else in the last column says *kept*, and that is the point: none of those six gestures is a statement about how you want to be answered.
+The bottom two rows are day 12's, and they are the only pair in the table that does the same thing to different depths: switching personality off is `Close a task` for the thing you declared — nothing is deleted, it simply stops being sent — while deleting a profile is `✕` on an item. Everything else in the last column says *kept*, and that is the point: none of those six gestures is a statement about who you are or how you want to be answered.
 
 The two rows above them are day 11's, and the first four gained a column that says *kept* twice. That is deliberate: clearing a chat is a statement about that chat. Something you moved into another layer on purpose is not part of it any more, and "clear this conversation" is not a statement about the task or about you.
 
@@ -434,28 +475,36 @@ The panel is where you *look* at memory and prune it. It is not where you write 
 Day 12 adds a second button beside it, with the active profile's name on it rather than a badge:
 
 ```
-Personality  ⟨ TERSE ⟩
+Personality  ⟨ WORK ⟩
 
   PERSONALITY                                                          YOU
 
-  ○  — no personality —     Answers on the agent's default configuration
-  ●  Terse                  direct; at most five sentences               Edit  Delete
-  ○  Tutor                  numbered steps, then the answer              Edit  Delete
-  ○  Russian reviewer       Russian; blunt; weakest point first          Edit  Delete
+  ○  — no personality —    Answers on the agent's default configuration
+  ●  Work                  in Russian · Python + FastAPI · senior dev…   Edit  Delete
+     STYLE  PREFERENCES  CONTEXT
+  ○  Weekend project       plain English · Go, no deps · side project     Edit  Delete
+     STYLE  preferences  CONTEXT
 
-  [ + New profile ]                                                   3 of 12
+  [ + New profile ]                                                   2 of 12
 
   SENT WITH EVERY REQUEST
-    Tone: plain and direct; state the conclusion first
-    Format: at most five sentences, unless asked for more
-    Never:
-    - apologise
-    - open with a preamble
+    How they want answers written:
+    - in Russian
+    - short and direct, no preamble
+    Standing preferences, whatever the topic:
+    - Python + FastAPI, minimum dependencies
+    - free APIs only
+    Who they are and what they are working on:
+    - senior developer, team of 3, deadline in two weeks
 ```
 
 A sibling of the memory button rather than a section inside it, because the two are not the same kind of thing — one holds what the agent learned, the other what you declared. The chip is the only part of this that has to be visible without opening anything: which personality the answer on screen was given under is exactly the question a panel cannot answer while it is shut.
 
-The four fields in the editor come from `GET /api/config`, which reads them off `personality.FIELD_INFO` — so a field cannot exist in the form and not in the prompt. **Sent with every request** is the rendered block as the server will actually send it, served rather than rebuilt in the page: a screen showing its own idea of what was sent cannot be used to find out what was sent.
+Under each name, three chips, always all three, the unfilled ones greyed. A profile with only a style in it is a different thing from a finished one, and a truncated summary line cannot tell you which you are looking at — the absence is the information, so a list that only showed what *is* filled would be showing the wrong half.
+
+The three fields in the editor come from `GET /api/config`, which reads them off `personality.FIELD_INFO` — so a field cannot exist in the form and not in the prompt. **Sent with every request** is the rendered block as the server will actually send it, served rather than rebuilt in the page: a screen showing its own idea of what was sent cannot be used to find out what was sent.
+
+And the panel is not where you first meet this. A new chat asks for it [in the transcript](#it-asks-at-the-start-of-a-new-chat), which is the one place a person is looking at the moment the question is worth asking.
 
 The short layer is described by the context strip instead. Repeating a worse version of it here would give the two something to disagree about.
 
@@ -644,7 +693,7 @@ server.py             transport, the introduction between a saved transcript
         │              request is allowed to carry
         ├───────────┬───────────┬───────────┬────────────┬───────────┐
 agent.py   strategies.py  facts.py    memory.py   personality.py  store.py
- the agent:  the three     the key-    the three    ★ the four      branches,
+ the agent:  the three     the key-    the three    ★ the three     branches,
  facts=      names, the    value       layers, and  ★ fields, and   facts,
  summary=    default and   memory and  what the     ★ how they      tasks, the
  long_term=  the one line  the patch   agent would  ★ render into   long-term
@@ -659,7 +708,7 @@ llm_client.py         HTTP: POST /chat/completions
    DeepSeek
 ```
 
-`personality.py` is the shortest of the five siblings and the only one that makes no request and stores nothing: it is four field names, a cleaner, and a renderer. It imports nothing from the app — **not even `memory.py`**, which is the part worth noticing. Personalisation and memory are next to each other in the diagram and share no code at all, because they share no mechanism: one is scored and sampled, the other is sent whole.
+`personality.py` is the shortest of the five siblings and the only one that makes no request and stores nothing: it is three field names, a cleaner, and a renderer. It imports nothing from the app — **not even `memory.py`**, which is the part worth noticing. Personalisation and memory are next to each other in the diagram and share no code at all, because they share no mechanism: one is scored and sampled, the other is sent whole.
 
 `strategies.py`, `facts.py` and `compaction.py` all sit next to `agent.py` rather than under it, and none of them imports it. The two that make requests are handed an `LLMClient` exactly as the agent is, and know nothing about conversations, files or the web app. `strategies.py` makes no request at all — it is names, a default, and a pure `split()` — which is why the decision underneath all three can be read in one screen and tested without an API key.
 
@@ -706,7 +755,7 @@ agent = build_agent(settings, plan, profile)      # ← not settings, not plan
 
 `plan` is the answer to "what of the past goes into this request", and a profile is not part of the past. `settings` is the chat's own configuration, stored with it and sent up with every message, and a profile is not that either — it is one object for the whole app. So it is its own parameter, read once in `post_chat` from the only place that knows which profile is switched on, and read there rather than inside `build_agent` so that the reply can report the same record the request was built from.
 
-The agent itself is handed a string and a place to put it, exactly as it is for the other four blocks. It does not know the string came from a profile, that there are others, or that any of it can be switched — which is what keeps "add a fifth field" a change to `personality.py` and the form, and no change at all to `Agent`.
+The agent itself is handed a string and a place to put it, exactly as it is for the other four blocks. It does not know the string came from a profile, that there are others, or that any of it can be switched — which is what keeps "add a fourth field" a change to `personality.py` and the form, and no change at all to `Agent`.
 
 ## What a stored conversation looks like
 
@@ -778,22 +827,22 @@ The debug panel is **not** persisted. It is a log of HTTP calls this page made, 
 ```json
 {
   "profiles": [
-    { "id": "terse",
-      "name": "Terse",
+    { "id": "work",
+      "name": "Work",
       "fields": {
-        "tone": "plain and direct; state the conclusion first",
-        "format": "at most five sentences, unless asked for more",
-        "constraints": "apologise\nopen with a preamble\nrestate the question"
+        "style": "in Russian\nshort and direct, no preamble",
+        "preferences": "Python + FastAPI\nminimum dependencies\nfree APIs only",
+        "context": "senior developer\nvoice assistant\nteam of 3\ndeadline in two weeks"
       },
       "created_at": "2026-09-20T09:14:02.118+00:00",
       "updated_at": "2026-09-20T09:31:55.702+00:00" }
   ],
-  "active": "terse",
+  "active": "work",
   "updated_at": "2026-09-20T09:31:55.702+00:00"
 }
 ```
 
-One file rather than one per profile, for the reason `long_term.json` is one file: the whole of it is read on every single request. `active` lives in the same file as the list it points into, so an id naming a profile that has been deleted is not a state anything has to handle — `Personality.resolve` clears it on the way in, which is also why deleting the profile you are using switches personality off instead of quietly promoting another.
+One file rather than one per profile, for the reason `long_term.json` is one file: the whole of it is read on every single request. `active` lives in the same file as the list it points into, so an id naming a profile that has been deleted is not a state anything has to handle — `Personality.resolve` clears it on the way in, which is also why deleting the profile you are using switches personalisation off instead of quietly promoting another.
 
 `updated_at` is separate from `created_at` here and nowhere else in the app. That is the whole difference between a profile and a `MemoryItem`: an item is filed once and afterwards only replaced, and a profile is *edited*.
 
@@ -873,7 +922,16 @@ CHAT_STORE_DIR=~/chats uv run server.py
 
 Three more directories sit beside it, one per thing that is not a conversation, each with its own override: `data/tasks/` (`CHAT_TASKS_DIR`), `data/memory/` (`CHAT_MEMORY_DIR`) and, since day 12, `data/personality/` (`CHAT_PERSONALITY_DIR`). The last one is a fourth directory rather than a corner of the third on purpose — `data/memory/` is where a reader goes to find out what the agent *knows*, and filing standing instructions under that name would make the one distinction this day exists to draw invisible on disk.
 
-The three seeded profiles are written the first time the server starts and never again. The condition is the file, not an empty list: deleting every profile is a thing a person can decide, and an app that quietly put three back on the next restart would be overruling them once a day.
+Two seeded profiles — both switched off — are written the first time the server starts and never again. The condition is the file, not an empty list: deleting them is a thing a person can decide, and an app that quietly put them back on the next restart would be overruling them once a day.
+
+They are two different kinds of thing, which is the whole of why there are not six:
+
+- **`Example`** fills all three fields, so the shape is visible before you have filled any of them in. Read it, then delete it.
+- **`Rational`** fills only `style`, and is meant to be used as it stands: answer first and briefly, then name what the question leaves out — the assumption it rests on, the option not considered, the cost not priced — make the strongest case *against* the answer just given, and say plainly when there is not enough information to answer and what is missing.
+
+The first cut of this day shipped three writing styles, because a profile *was* a writing style. A profile is now largely about a particular person — their seniority, their project, their team — and shipping invented people would be noise in the one list that is supposed to be yours. But `style` is the one field of the three that is **not** about a particular person: nothing about "answer first, then say what the question leaves out" belongs to anybody, which is exactly what makes a style-only profile shippable when a filled-in `context` is not.
+
+`Rational` is also written as instructions about the *shape of an answer* rather than as a character. "You are a rigorous analyst" is something a model performs; "name the assumption the question rests on" either happened or it did not, and only the second kind can be checked against the answer that comes back.
 
 Two tabs at the top switch between the modes: **Single chat** and **Compare models**. The last tab you used is remembered across reloads.
 
@@ -932,7 +990,7 @@ Day 9 adds a fourth, and it is the only act that looks at a **request body** rat
 
 Day 10 adds a fifth, in three parts. The first sends a message to a planted twelve-message conversation under each strategy in turn and reads the **request body** that came out: the sliding window is one system message and the last four, with the strip reporting eight dropped and no second request made at all; sticky facts is the same window with a labelled block in front of it, one `key: value` per line, and not one of the eight messages it stands for sent twice. The second drives an extraction that **fails** — a dummy key makes that easy — and checks that the turn still goes, that the block goes up exactly as it already stood, and that nothing was written down that was never produced. The third needs no model at all: a checkpoint is saved, forked **twice from the same position**, a message sent into each branch, and the suite asserts that both forks show eight messages while storing two, that `main` is still exactly twelve on disk, that switching gives back the other continuation intact, that a message lands in the branch on screen, and that the trunk cannot be deleted out from under its children. Then all of it again on the page, through the branch bar — including the checkpoint drawn in the transcript at the message it marks, and the whole tree coming back after a reload.
 
-Day 12 adds the last act, and it is the shortest, because the feature is. It opens the panel on a page that has never been personalised and checks that the app ships with profiles far enough apart to tell apart and **none of them switched on** — "before" being half of what there is to see. It sends a question under no personality and confirms the request carries nothing about answering; switches one on with a single click and checks the file on disk, the chip on the button, and the rendered block in the panel; then sends the next question and reads the **request body**, asserting both that the block is there as its own labelled system message and that it sits *after* everything the agent remembers — the one placement decision in this day that is arguable, and therefore the one worth pinning down. Then, against the filesystem: **not one conversation record mentions any of it.** The rest is the editor — four fields rather than one box, an edit saved against the same id so the active profile stays active, a new profile that does *not* switch itself on, and deleting the active one leaving personality **off** rather than falling back to somebody else's.
+Day 12 adds the last act. It starts a brand-new chat and checks that it is **asked** — the card in the transcript, its saved profiles one click each — then sends a question and confirms two things at once: no personalisation rode along, and the invitation got out of the way the moment anything was said. It starts another chat, switches a profile on *from the card itself*, and watches the card stop asking and become one line. Then it asks the API for a request body and asserts the placement the day turns on — the one decision here that is arguable, and therefore the one worth pinning down: the personalisation is its own labelled system message, the developer's line is still first and is *not* what carries it, and the block sits **after** everything the agent remembers, with all three fields under labels of their own — including `team of 3`, which is the field the agent could never have worked out. Then, against the filesystem: **not one conversation record mentions any of it.** The rest is the panel — three named fields rather than one box, the three filled/unfilled chips under each name, an edit saved against the same id so the active profile stays active, a new profile that does *not* switch itself on, a profile written under this day's first four-field shape folding into `style` **without its prohibitions being inverted**, and deleting the active one leaving personalisation **off** rather than falling back to somebody else's.
 
 What it does *not* cover: how anything looks. jsdom has no layout engine, so widths, wrapping and overflow are only checked as computed style values, never as rendered pixels.
 
@@ -1040,24 +1098,32 @@ curl -s localhost:8000/api/chat -H 'Content-Type: application/json' \
 And the whole of day 12, which is shorter because there is less to it — one object, one switch:
 
 ```bash
-curl -s localhost:8000/api/personality | jq '{active, names: [.profiles[].name]}'
-# {"active": null, "names": ["Terse", "Tutor", "Russian reviewer"]}
+curl -s localhost:8000/api/personality -H 'Content-Type: application/json' -d '{
+  "name": "Work",
+  "fields": {
+    "style":       "in Russian\nshort and direct, no preamble",
+    "preferences": "Python + FastAPI\nminimum dependencies\nfree APIs only",
+    "context":     "senior developer\nvoice assistant\nteam of 3\ndeadline in two weeks"
+  }}' | jq '{active, names: [.profiles[].name]}'
+# {"active": null, "names": ["Example", "Work"]}   ← created, not switched on
 
 curl -s localhost:8000/api/personality/activate -H 'Content-Type: application/json' \
-  -d '{"profile_id": "russian-reviewer"}' | jq -r .block
-# Language: Russian
-# Tone: blunt and critical; disagree when there is reason to
-# Format: bullet points; the weakest point first
-# Never:
-# - compliment the question
-# - hedge a judgement you can justify
+  -d '{"profile_id": "work"}' | jq -r .block
+# How they want answers written:
+# - in Russian
+# - short and direct, no preamble
+#
+# Standing preferences, whatever the topic:
+# - Python + FastAPI
+# ...
 
 # Every chat on the machine now answers that way - including ones opened
 # before the switch, because nothing about a profile is stored in a chat.
 curl -s localhost:8000/api/chat -H 'Content-Type: application/json' \
   -d '{"message": "is this a good schema?", "conversation_id": "single"}' \
-| jq -r '.personality.active'
-# "russian-reviewer"
+| jq -r '.personality.active, (.debug.request.messages | map(.role) | join(", "))'
+# "work"
+# system, system, user          ← the role, the profile, the question
 
 # And off is a state, not a missing value:
 curl -s localhost:8000/api/personality/activate -H 'Content-Type: application/json' \
@@ -1065,7 +1131,7 @@ curl -s localhost:8000/api/personality/activate -H 'Content-Type: application/js
 # {"active": null, "block": ""}
 ```
 
-Then `grep -l russian data/conversations/*.json` and find nothing. The profile was applied to the request and written into no transcript, which is the one claim of the day that can be checked against the filesystem.
+Note where the block landed: its own system message, after anything the agent remembers and before the question. Then `grep -l "voice assistant" data/conversations/*.json` and find nothing — the profile was applied to the request and written into no transcript, which is the one claim of the day that can be checked against the filesystem.
 
 ```bash
 curl -s localhost:8000/api/chat -H 'Content-Type: application/json' \

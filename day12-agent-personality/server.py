@@ -758,8 +758,16 @@ def profile_report(profile: Profile | None) -> dict | None:
     return {
         "id": profile.id,
         "name": profile.name,
-        "fields": dict(profile.fields or {}),
+        # Cleaned rather than raw: a profile written under the first shape of
+        # this day has its four old fields folded into `style` by
+        # `clean_fields`, and the form has to be handed what the prompt will
+        # actually say, not what happens to be on disk.
+        "fields": personality_module.clean_fields(profile.fields),
         "summary": personality_module.summary(profile),
+        # Which of the three are filled in, so a half-written profile looks
+        # half-written in the list instead of looking finished with a short
+        # summary. The panel draws these as chips under the name.
+        "filled": personality_module.filled(profile),
         "rendered": personality_module.render(profile),
         "updated_at": profile.updated_at,
     }
