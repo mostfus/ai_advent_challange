@@ -1602,10 +1602,20 @@ async function waitFor(fn, timeout = 15000) {
   const pills = () => qa12("#memory-body .phase-pill");
   const pill = (label) => pills().find((p) => p.textContent.trim() === label);
   // Day 13: the rail reports, it does not move anything - an unreachable
-  // stage wears `.blocked` rather than being a disabled button. Moving is the
-  // "Move to" select, which only ever lists what the machine allows, so an
-  // illegal target is absent there rather than refused.
+  // stage wears `.blocked` rather than being a disabled button, with the
+  // machine's own sentence on it, and a stage that is only waiting on its
+  // checklist says *that* rather than looking the same as a refusal.
+  //
+  // Nothing on this panel sets a stage by hand while the agent is reading
+  // answers. That was the bug this act now checks for: a "Move to" menu that
+  // was always there sent `confirm`, `confirm` ticks every outstanding
+  // required step, and so planning could be walked through to done in four
+  // choices with nothing agreed, built or checked. The menu exists only as
+  // the fallback for a chat where the agent half is switched off - checked
+  // further down - and otherwise the stage moves one way: the agent reports,
+  // `check` rules, a person accepts.
   const blocked = (label) => pill(label).classList.contains("blocked");
+  const why = (label) => pill(label).title;
   const moveMenu = () => q12("#memory-body .phase-go select");
   const offered = () => (moveMenu()
     ? Array.from(moveMenu().options).slice(1).map((o) => o.textContent)
@@ -1615,6 +1625,11 @@ async function waitFor(fn, timeout = 15000) {
     moveMenu().value = option.value;
     moveMenu().dispatchEvent(new dom12.window.Event("change", { bubbles: true }));
   };
+  const taskStateToggle = () => q12("#task-state-toggle");
+  const letAgentMove = (on) => {
+    taskStateToggle().checked = on;
+    taskStateToggle().dispatchEvent(new dom12.window.Event("change", { bubbles: true }));
+  };
   const stepBoxes = () => qa12("#memory-body .step-row input");
   const stepLabel = (i) => qa12("#memory-body .step-row .step-label")[i].textContent.trim();
   const taskFile = () => storedTasks()[0];
@@ -1623,6 +1638,37 @@ async function waitFor(fn, timeout = 15000) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
+  // The agent's half, planted on disk rather than driven, because raising a
+  // suggestion needs a model that answers: the suite's key is a dummy, so
+  // every turn errors and the watcher is never asked. What is checked
+  // throughout is the half a person deals with - that an offer is drawn,
+  // that accepting it moves the task through the same machine, and that
+  // accepting it cannot buy a jump.
+  const plantSuggestion = (to, reason) => {
+    const file = path.join(TASKS_DIR, `${taskId}.json`);
+    const task = JSON.parse(fs.readFileSync(file, "utf8"));
+    task.suggested = { to: to, why: reason, at: "2026-09-20T10:00:00.000+00:00" };
+    fs.writeFileSync(file, JSON.stringify(task));
+  };
+  const reopenMemory = async () => {
+    click12(q12("#memory-btn"));
+    click12(q12("#memory-btn"));
+    await waitFor(() => q12("#memory-body .task-row"));
+  };
+  const suggest = () => q12("#memory-body .phase-suggest");
+  const suggestBtn = (label) => Array.from(suggest().querySelectorAll("button"))
+    .find((b) => b.textContent.toLowerCase().includes(label));
+  // One accepted offer, end to end: plant it, redraw the panel, press the
+  // button a person would press, and wait for the turn it sends in answer.
+  const acceptMove = async (to, reason) => {
+    plantSuggestion(to, reason);
+    await reopenMemory();
+    await waitFor(() => suggest());
+    click12(suggestBtn("move to"));
+    await waitFor(() => taskFile().phase === to);
+    await waitFor(() => !q12("#chat-inner .bubble.pending"));
+  };
 
   check("every stage is drawn, not only the reachable ones",
     pills().length === 4 &&
@@ -1637,12 +1683,13 @@ async function waitFor(fn, timeout = 15000) {
   check("a jump over a stage is drawn as out of reach, with the reason on it",
     blocked("Done") && pill("Done").title.includes("cannot go straight to done"),
     pill("Done").title);
-  check("and it is not on offer either - the menu lists what is allowed, only",
-    !offered().some((o) => o.startsWith("Done")),
+  check("and there is nothing to press anywhere on the panel that sets a stage",
+    !moveMenu() && !q12("#memory-body .phase-go"),
     offered().join("  |  "));
-  check("the next stage is reachable, and says what moving there would tick",
-    offered().some((o) => o.startsWith("Execution") && o.includes("marks 2 step")),
-    offered().join("  |  "));
+  check("the stage waiting on its checklist is not refused, it is not yet",
+    !blocked("Execution") && why("Execution").includes("Not yet") &&
+    why("Execution").includes("Goal and definition of done"),
+    why("Execution"));
   check("the checklist is the one in phases.py, required items marked",
     stepBoxes().length === 3 &&
     stepLabel(0).includes("Goal and definition of done") &&
@@ -1667,30 +1714,56 @@ async function waitFor(fn, timeout = 15000) {
   click12(stepBoxes()[0]);
   await waitFor(() => (taskFile().steps.planning || []).includes("goal"));
   await waitFor(() => stepBoxes()[0].checked);
-  check("one required step ticked still leaves one to confirm",
-    offered().some((o) => o.startsWith("Execution") && o.includes("marks 1 step")),
-    offered().join("  |  "));
+  check("one required step ticked still leaves one, and the rail says which",
+    why("Execution").includes("Not yet") &&
+    why("Execution").includes("An agreed list of steps") &&
+    !why("Execution").includes("Goal and definition"),
+    why("Execution"));
   click12(stepBoxes()[2]);
   await waitFor(() => (taskFile().steps.planning || []).includes("plan"));
-  await waitFor(() => offered().some((o) => o === "Execution"));
-  check("both of them, and the gate opens with nothing left to confirm",
-    offered().some((o) => o === "Execution") && blocked("Done"),
-    offered().join("  |  "));
+  await waitFor(() => why("Execution") === "Reachable from here");
+  check("both of them, and the gate is open - but nothing here opens it",
+    why("Execution") === "Reachable from here" && blocked("Done") && !moveMenu(),
+    why("Execution"));
 
-  moveTo("Execution");
-  await waitFor(() => taskFile().phase === "execution");
+  // ---- the only way the panel moves a task: the agent offers, you accept --
+  await acceptMove("execution", "the plan is agreed");
   await waitFor(() => pill("Execution").classList.contains("current"));
-  check("moving is one click, and the file says so too",
+  check("the stage moves because an offer was accepted, and the file says so too",
     taskFile().phase === "execution" &&
     taskFile().log.some((e) => e.kind === "move" && e.to === "execution"));
   check("the checklist is now execution's, and nothing is ticked in it",
     stepBoxes().length === 3 && stepBoxes().every((b) => !b.checked) &&
     stepLabel(0).includes("Every planned step"),
     stepLabel(0));
-  check("going back a stage is always on offer; going on costs a confirmation",
-    offered().some((o) => o === "Planning") &&
-    offered().some((o) => o.startsWith("Validation") && o.includes("marks 1 step")),
+  check("the rail keeps teaching: back is free, on is not yet, and done is refused",
+    why("Planning") === "Reachable from here" &&
+    why("Validation").includes("Not yet") &&
+    blocked("Done") && why("Done").includes("cannot go straight to done"),
+    [why("Planning"), why("Validation"), why("Done")].join("  |  "));
+
+  // ---- and the fallback, which is the reason the menu still exists at all -
+  //
+  // With "let the agent move the task between stages" off nothing reads the
+  // answers, so no offer will ever be raised: a panel with no control on it
+  // would leave the work frozen where it stands. Switched back on, the
+  // by-hand menu has to go again - that switch is the whole of who may move
+  // the task.
+  letAgentMove(false);
+  await waitFor(() => moveMenu());
+  check("switching the agent half off brings the by-hand menu back",
+    !!moveMenu() &&
+    q12("#memory-body .phase-go-why").textContent.includes("not reading answers"),
     offered().join("  |  "));
+  check("and it still lists only what the machine allows",
+    offered().some((o) => o === "Planning") &&
+    offered().some((o) => o.startsWith("Validation") && o.includes("marks 1 step")) &&
+    !offered().some((o) => o.startsWith("Done")),
+    offered().join("  |  "));
+  letAgentMove(true);
+  await waitFor(() => !moveMenu());
+  check("switching it back on takes it away again - the agent offers, you accept",
+    !moveMenu() && !q12("#memory-body .phase-go"));
 
   // ---- the state block reaches the model ----
   sentBodies.length = 0;
@@ -1716,23 +1789,6 @@ async function waitFor(fn, timeout = 15000) {
 
   // ---- the agent's opinion about the stage, waiting for a person ----
   //
-  // Planted on disk rather than driven, because raising one needs a model
-  // that answers: the suite's key is a dummy, so every turn errors and the
-  // watcher is never asked. What is checked here is the half a person deals
-  // with - that a suggestion is drawn, that accepting it moves the task
-  // through the same machine, and that accepting it cannot buy a jump.
-  const plantSuggestion = (to, why) => {
-    const file = path.join(TASKS_DIR, `${taskId}.json`);
-    const task = JSON.parse(fs.readFileSync(file, "utf8"));
-    task.suggested = { to: to, why: why, at: "2026-09-20T10:00:00.000+00:00" };
-    fs.writeFileSync(file, JSON.stringify(task));
-  };
-  const reopenMemory = async () => {
-    click12(q12("#memory-btn"));
-    click12(q12("#memory-btn"));
-    await waitFor(() => q12("#memory-body .task-row"));
-  };
-
   // The invariant first, and asked the hard way: the task is in execution, so
   // `done` has no edge to it. Confirming is a person saying "this stage is
   // done" and that is the only rule it can answer.
@@ -1745,7 +1801,6 @@ async function waitFor(fn, timeout = 15000) {
   plantSuggestion("validation", "the build is finished");
   await reopenMemory();
   await waitFor(() => q12("#memory-body .phase-suggest"));
-  const suggest = () => q12("#memory-body .phase-suggest");
   check("the agent's suggestion is drawn where the stage is",
     suggest().textContent.includes("ready for validation"),
     suggest().textContent.trim().slice(0, 60));
@@ -1755,8 +1810,6 @@ async function waitFor(fn, timeout = 15000) {
   check("it is an offer, not a move - the task has not budged",
     taskFile().phase === "execution", taskFile().phase);
 
-  const suggestBtn = (label) => Array.from(suggest().querySelectorAll("button"))
-    .find((b) => b.textContent.toLowerCase().includes(label));
   sentBodies.length = 0;
   click12(suggestBtn("move to"));
   await waitFor(() => taskFile().phase === "validation");
@@ -1830,8 +1883,13 @@ async function waitFor(fn, timeout = 15000) {
       .every((p) => p.classList.contains("blocked")) &&
     pill("Planning").title.includes("paused"),
     pill("Planning").title);
-  check("with nothing on offer at all - a paused task does not move",
-    !moveMenu(), offered().join("  |  "));
+  plantSuggestion("validation", "the build is finished");
+  await reopenMemory();
+  check("with nothing on the machine to press - not a menu, not even an offer",
+    !moveMenu() && !suggest() &&
+    q12("#memory-body .phase-paused").textContent.includes("until it is resumed"),
+    q12("#memory-body .phase-paused").textContent.trim());
+  await fetch(`${BASE}/api/tasks/${taskId}/suggestion`, { method: "DELETE" });
   const pausedMove = await postApi(`/api/tasks/${taskId}/phase`, { to: "validation" });
   check("a pause holds over HTTP too, not only in the panel",
     pausedMove.status === 409, String(pausedMove.status));
@@ -1876,13 +1934,13 @@ async function waitFor(fn, timeout = 15000) {
   // ---- going back unticks what going back means you have not done ----
   click12(stepBoxes()[0]);
   await waitFor(() => (taskFile().steps.execution || []).includes("work"));
-  moveTo("Planning");
-  await waitFor(() => taskFile().phase === "planning");
+  await acceptMove("planning", "the plan turned out to be wrong");
   await waitFor(() => pill("Planning").classList.contains("current"));
   check("re-planning clears planning's required boxes, so the gate means something again",
     !(taskFile().steps.planning || []).includes("plan") &&
-    offered().some((o) => o.startsWith("Execution") && o.includes("marks 2 step")),
-    JSON.stringify(taskFile().steps) + " :: " + offered().join("  |  "));
+    why("Execution").includes("Not yet") &&
+    why("Execution").includes("Goal and definition of done"),
+    JSON.stringify(taskFile().steps) + " :: " + why("Execution"));
   check("but what was merely written down is left written down",
     (taskFile().steps.execution || []).includes("work"),
     JSON.stringify(taskFile().steps));
@@ -1933,6 +1991,37 @@ async function waitFor(fn, timeout = 15000) {
     .map((o) => o.textContent.trim());
   check("and knows which stage the task finished in",
     reloadedTasks.some((t) => t.includes("Done")), reloadedTasks.join("  |  "));
+
+  // ---- reopening, which is the one move no offer can ever make ----
+  //
+  // A finished task is not sent and its answers are not read, so the watcher
+  // never runs on one: with nothing to raise an offer, a `done` task with no
+  // control on it would be a dead end, and the `done -> execution` edge - the
+  // one that exists because work comes back - would be unreachable from the
+  // app that draws it. So it has a button, and it is a move backwards: it
+  // goes through `check` like every other, and ticks nothing.
+  await reopenMemory();
+  await waitFor(() => q12("#memory-body .phase-reopen button"));
+  const reopenBtn = () => q12("#memory-body .phase-reopen button");
+  check("a finished task offers the one edge out of the end",
+    reopenBtn().textContent.includes("Reopen in execution"),
+    reopenBtn().textContent.trim());
+  click12(reopenBtn());
+  await waitFor(() => taskFile().phase === "execution");
+  check("reopening moves it back through the machine, and into the log",
+    taskFile().phase === "execution" &&
+    taskFile().log.slice(-1)[0].from === "done" &&
+    taskFile().log.slice(-1)[0].to === "execution",
+    JSON.stringify(taskFile().log.slice(-1)[0]));
+  check("and it ticks nothing on the way - going back never confirms anything",
+    (taskFile().steps.validation || []).length === 2,
+    JSON.stringify(taskFile().steps));
+
+  // Back to done for the rest of the act, one legal move at a time.
+  await postApi(`/api/tasks/${taskId}/phase`, { to: "validation", confirm: true });
+  await postApi(`/api/tasks/${taskId}/phase`, { to: "done", confirm: true });
+  await reopenMemory();
+  await waitFor(() => taskFile().phase === "done");
 
   // ---- a finished task can be removed, not only reopened ----
   const deleteBtn = () => Array.from(q12("#memory-body .task-row").querySelectorAll("button"))

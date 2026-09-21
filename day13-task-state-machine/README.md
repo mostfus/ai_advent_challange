@@ -187,7 +187,7 @@ The second attempt is given `phases.correction()`: what its last answer did, why
 
 The prompt carries the rules as well, now, and the two are not alternatives. The state block names the stages reachable from here, says to stay put *especially* when asked to skip — and, just as importantly, tells the model **not to stall**: when the stage's work really is finished, say so in a line and carry on, because the app is reading the answer and will make the offer. "I cannot change the stage myself" is not caution, it is a dead end, and an agent that says it has found a way to be stuck that no rule asked for.
 
-It all has one switch in **⚙ Settings**, next to day 11's. Off, the machine is still there and still enforced; moving between stages becomes something you click from the pills, and nothing re-reads the answers.
+It all has one switch in **⚙ Settings**, next to day 11's, and it decides *who may move the task*. On, nothing in the panel sets a stage by hand: the agent reports, `check` rules, and the only thing to press is the offer. Off, nothing re-reads the answers and so nothing will ever raise one — the machine is still there and still enforced, but the panel grows a **Move to** menu, because a machine nothing can drive is not stricter, it is stuck.
 
 **And none of it is written down except what happened.** `Task.log` records transitions that were *made*, and the pause switch. A move the machine would not make did not happen; an offer that was declined did not happen either. A log carrying them would be a history of things that are not true — a worse record than one that is simply correct.
 
@@ -197,9 +197,14 @@ The four stages are drawn as a rail, always all four, with the unreachable ones 
 
 They are not buttons. They were, for a while, and it was a trap one click deep — a stray click changed which stage a piece of work was in, and the way back cost two ticked boxes, because coming back a stage clears what that stage had claimed. A control that destructive should not be four targets wide and fire on a single click.
 
-So moving by hand is a **Move to** menu underneath, and it lists only what the machine allows: an illegal target is not refused there, it is absent. An option that is forward through an unticked checklist says so — *marks 2 step(s) done* — because choosing it is a person saying this stage is finished, which is exactly what ticking those boxes means. Going back is always on the list and costs nothing. A paused task has no menu at all.
+There was a **Move to** menu underneath for a while, always drawn, and it quietly undid the day. Choosing a stage forward in it sends `confirm`, and `confirm` means *a person says this stage is done* — so it ticked every outstanding required step and asked the machine again. Which means the checklist that is supposed to hold the exit could be walked straight through: planning to done in four choices and two minutes, with no plan agreed, nothing built and nothing checked. A gate that opens for anyone who presses *open the gate* is decoration, and a task driven that way leaves a log that is a history of work which never happened.
 
-Between the two, the rail teaches the machine and the menu operates it, and neither fires by accident.
+So it is gone, and the stage moves the one way this day argues it should: **the agent reports, the code rules, and a person accepts the offer.** Nothing else in the panel sets a stage — which is also what makes the rail honest, since there is now nothing on it or under it that could move anything.
+
+Two exceptions, and they are the same argument read from the other end:
+
+- **the agent half switched off** — no answer is read, so no offer is ever raised. The **Move to** menu comes back, as the fallback it always should have been, and says on its face why it is there;
+- **`done`** — a finished task is not sent and its answers are not read, so the watcher never runs on one and no offer can ever reopen it. That is a single **Reopen in execution** button, and it is a move *backwards*: it goes through `check` like every other, ticks nothing, confirms nothing, and lands in the log as the transition it is.
 
 ### Pause, at any stage
 
@@ -737,10 +742,6 @@ Memory  ②
   Planning  ›  ● EXECUTION  ›  Validation  ›  Done
                                               └ greyed: "Execution cannot
                                                 go straight to done."
-  Move to [ — choose a stage —                                   ▾ ]
-             Planning
-             Validation — marks 1 step(s) done
-
   The agent says the work is ready for validation.
   the build is finished · Moving marks as done: Every planned step done
   [ Move to validation ]  [ Not yet ]

@@ -1602,7 +1602,9 @@
        stage of a piece of work - with the way back costing two ticked boxes,
        because coming back a stage clears what that stage had claimed. A
        control that destructive should not be four targets wide and one click
-       deep. Moving is `.phase-go` below, chosen on purpose. */
+       deep. Nor is moving anywhere else on this rail: while the agent is
+       reading the answers, the only way a stage changes is the offer it
+       raises and a person accepting it - `.phase-suggest` below. */
     cursor: default;
     user-select: none;
   }
@@ -1616,9 +1618,20 @@
      the machine working correctly is the commonest reason for this state. */
   .phase-pill.blocked { opacity: 0.38; }
   .phase-arrow { color: var(--text-muted); font-size: 10px; }
+  /* The hand-driven menu, and it is drawn only when nothing else can move
+     the task: with "let the agent move the task between stages" switched
+     off, no answer is ever read and no offer is ever raised, so a panel with
+     no control on it would leave the work frozen where it stands. While that
+     switch is on this is absent - a person answers the agent's offer, and
+     that is the whole of the write interface. */
   .phase-go { display: flex; gap: 6px; align-items: center; margin-top: 7px; }
   .phase-go select { flex: 1; min-width: 0; font-size: 11px; }
   .phase-go-label { font-size: 11px; color: var(--text-muted); flex: none; }
+  .phase-go-why { font-size: 10.5px; color: var(--text-muted); margin-top: 4px; }
+  /* Reopening, which is a move and still goes through `check` - but the one
+     move no offer can ever make, because a finished task is not sent and its
+     answers are not read. */
+  .phase-reopen { margin-top: 7px; }
   .phase-paused {
     font-size: 11px;
     color: var(--bubble-error-text);
@@ -2199,12 +2212,15 @@
               extra request per message.</div>
           </div>
 
-          <!-- Day 13. The other after-the-answer request, and the one that
-               does not wait for anybody: what it reports goes through the
-               transition rules and onto the disk. Switching it off does not
-               switch the machine off - the stages, the checklists and the
-               refusals are all still there, and moving between them becomes
-               something you do by clicking. -->
+          <!-- Day 13. The other after-the-answer request, and the one
+               that decides who may move the task at all. On, the agent
+               reports where the work stands, the transition rules rule on
+               it, and what reaches the screen is an offer with a person's
+               button on it - the panel has no way to set a stage by hand.
+               Switching it off does not switch the machine off - the stages,
+               the checklists and the refusals are all still there - but
+               nothing is left to raise an offer, so the panel grows a
+               "Move to" menu and moving becomes something you do yourself. -->
           <div class="field">
             <label class="checkbox-label">
               <input type="checkbox" id="task-state-toggle" />
@@ -2216,7 +2232,11 @@
               cannot reach is thrown away before you see it and asked for again, so
               skipping ahead is impossible rather than merely disallowed. Skipped
               entirely while a task is paused. Costs one small extra request per
-              message, and a second answer on the turns it rejects one.</div>
+              message, and a second answer on the turns it rejects one.
+              <strong>While this is on, the stage only ever moves because you
+              accepted what the agent reported</strong> - there is no by-hand
+              stage control in <strong>Memory</strong>. Off, that menu comes
+              back, because otherwise nothing could move the task at all.</div>
           </div>
 
           <!-- Day 7: the context this chat carries, and the button that
@@ -4177,6 +4197,11 @@
     if (!chat) return;
     chat.settings.task_state = taskStateToggle.checked;
     saveActiveSettings();
+    // This switch decides who may move the task, so the panel that says how
+    // it moves has to be redrawn with it: on, the stage follows an offer and
+    // there is nothing to press; off, the hand-driven menu is the only thing
+    // left that can move it at all.
+    renderMemory();
   });
 
   strategySelect.addEventListener("change", () => {
@@ -4841,15 +4866,37 @@
     });
     wrap.appendChild(rail);
 
-    // The only way to move the task by hand, and it lists exactly what the
-    // machine allows - so an illegal move is not refused here, it is absent.
-    // A select rather than four buttons because moving a stage is a decision,
-    // and a decision should cost opening something.
+    // Day 13, corrected. The rail reports; the offer moves; and between
+    // those two there used to be a third thing that quietly undid the day.
+    //
+    // It was a "Move to" menu, drawn here whatever else was true. Choosing a
+    // stage forward in it sends `confirm`, `confirm` means "a person says
+    // this stage is done", and `move` answers that by ticking every
+    // outstanding required step and asking the machine again. So the
+    // checklist that is supposed to hold the exit could be walked straight
+    // through: planning to done, four choices, two minutes, with no plan
+    // agreed, nothing built and nothing checked. A gate that opens for
+    // anyone who presses "open the gate" is decoration, and the log of a
+    // task driven that way is a history of work that never happened.
+    //
+    // So it is gone from the ordinary case, and the stage now changes the
+    // one way the day argues it should: the agent reports where the work
+    // stands, `check` rules on that, and a person accepts the offer.
+    //
+    // Two exceptions, and both are the same argument read from the other
+    // end - a machine nothing can drive is not stricter, it is stuck:
+    const chat = activeChat();
+    const agentMoves = !chat || !chat.settings || chat.settings.task_state !== false;
+
+    //   1. The agent half switched off. Nothing reads the answers, so nothing
+    //      will ever raise an offer, and a panel with no control on it would
+    //      leave the work frozen where it stands. The menu comes back, and
+    //      says why it is there - it is a fallback, not the way this works.
     const reachable = ((CONFIG && CONFIG.phases) || []).filter((p) => {
       const move = (task.moves || {})[p.id] || {};
       return move.ok || move.code === "incomplete";
     });
-    if (reachable.length && !task.paused) {
+    if (!agentMoves && reachable.length && !task.paused) {
       const go = makeEl("div", "phase-go");
       go.appendChild(makeEl("span", "phase-go-label", "Move to"));
       const select = makeEl("select");
@@ -4887,6 +4934,36 @@
       });
       go.appendChild(select);
       wrap.appendChild(go);
+      wrap.appendChild(makeEl("div", "phase-go-why",
+        "The agent is not reading answers in this chat, so nothing will " +
+        "offer to move this on. Switch that back on in \u2699 Settings to " +
+        "have the stage follow the work instead."));
+    }
+
+    //   2. `done`. A finished task is not sent and its answers are not read,
+    //      so no offer can ever reopen one - and the edge out of the end
+    //      exists precisely because work comes back. It is a move backwards:
+    //      it goes through `check` like every other, ticks nothing, confirms
+    //      nothing, and lands in the log as the transition it is.
+    const reopen = agentMoves && !task.paused && task.phase === "done"
+      ? reachable.find((p) => ((task.moves || {})[p.id] || {}).ok)
+      : null;
+    if (reopen) {
+      const back = makeEl("div", "phase-reopen");
+      const button = makeEl("button", "ghost-btn",
+        "Reopen in " + reopen.label.toLowerCase());
+      button.type = "button";
+      button.title = "Work has come back. Nothing is lost and nothing is " +
+        "unticked - the task starts being sent again.";
+      button.addEventListener("click", async () => {
+        try {
+          absorbMemory(await API.moveTask(task.id, reopen.id, "", false));
+        } catch (err) {
+          machineFailed(err);
+        }
+      });
+      back.appendChild(button);
+      wrap.appendChild(back);
     }
 
     // The suggestion, above everything else in the section: it is the one

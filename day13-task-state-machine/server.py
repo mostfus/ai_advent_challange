@@ -1609,10 +1609,12 @@ def move_task(task_id: str, req: MoveRequest) -> dict:
 
     A refusal comes back as 409 with the machine's own sentence in it, and
     that status is the right one: the request was well formed and nameable,
-    and the reason it failed is the state the task is in. The panel greys
-    these out before they can be clicked, so the only way to reach this line
-    is `curl` or a page that has gone stale - and both should be told what the
-    rule is rather than that something went wrong.
+    and the reason it failed is the state the task is in. Nothing on the
+    panel offers a refused move - the rail only reports them, an offer is
+    only ever raised for a move `check` has already allowed - so the ways to
+    reach this line are `curl`, a page that has gone stale, and the by-hand
+    menu a chat gets when the agent is not reading its answers. All three
+    should be told what the rule is rather than that something went wrong.
 
     The refusal is already in the task's log by the time this returns, written
     by `move`. That is deliberate: a state machine that only records the moves
