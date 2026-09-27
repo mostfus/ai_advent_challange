@@ -79,27 +79,29 @@ TASK  ⟨ Build the iOS app · Execution ⟩    + New   [ Pause ]   [ Delete ]
 
 Every tool so far - ours on day 17, other people's on day 16 - is a function. The model asks, the tool answers, and between two questions nothing happens at all. The agent exists for as long as an HTTP request does.
 
-This day gives it something to do while nobody is asking. `events_mcp_server.py` is a second MCP server of our own, and the first one with a **clock**: it watches Cape Town's event listings on a schedule, keeps what it finds in SQLite, and every run that turns up something new leaves a **digest** behind. The app picks the digest up and posts it into a chat called **Digests**, written by the model - so the next time you open the page there is a message waiting that nobody asked for.
+This day gives it something to do while nobody is asking. `events_mcp_server.py` is a second MCP server of our own, and the first one with a **clock**: it watches Cape Town's event listings on a schedule, keeps what it finds in SQLite, and every run that turns up something new leaves a **digest** behind.
+
+And it lives **somewhere else**. The server runs 24/7 on a VPS; the agent is this app, started on your own machine when you want it. It connects to the server over HTTPS - the way it connects to DeepWiki - to set watches up, and when it comes back after a day or a week it picks up everything collected meanwhile and posts it into a chat called **Digests**, written by the model.
 
 ```
-you   "Follow jazz, theatre and tech meetups in Cape Town. Every morning."
-        │
-agent.py ──► DeepSeek ──► cape-town-events__list_sources, then
-                          cape-town-events__create_watch{interests, sources, daily_at: "07:00"}
-        │
-events_mcp_server.py      its own process, :8788, no API key
-  ├─ Scheduler thread     wakes every 30 s, runs what is due - daily at 07:00 Cape Town time
-  ├─ collectors           schema.org JSON-LD · The Events Calendar API · iCal - read by code
-  ├─ SQLite               watches · events (first_seen_at) · runs · digests
-  └─ events://digests     the digest log - a resource, for the app rather than the model
-        ▲
-        │ every 30 s: anything new?      (polled - the server cannot call anybody)
-server.py ── digests.Courier ──► DeepSeek writes it ──► the "Digests" chat, with cards
+YOUR MACHINE (when you want it)                     VPS (24/7)
+────────────────────────────────                    ──────────────────────────────────────────
+you  "Follow jazz and theatre in Cape Town,         events_mcp_server.py   https://<domain>:8788/mcp
+      every morning."                                 ├─ Bearer token, TLS, Host pinned
+        │                                             ├─ Scheduler thread: daily at 07:00 Cape Town
+agent.py ─► DeepSeek ─► create_watch{...} ── MCP ──►  ├─ collectors: JSON-LD · Events Calendar · iCal
+                                           HTTPS      ├─ SQLite: watches · events · runs · digests
+server.py ─ digests.Courier ◄── events://digests ──   └─ keeps collecting while the agent is off
+   │   "anything new since my cursor?"
+   ▼
+DeepSeek writes it ─► the "Digests" chat, with cards   (one "while you were away" digest after a gap)
 ```
 
 ### Who holds the clock, and why it is the server
 
 Not the model: it has no clock, and it cannot wake itself up. Not the agent app either, and that is the less obvious half: MCP is request → response, and this app holds no session open (day 16's decision) - so there is nothing a server could call back on. The schedule therefore lives in the only process that is always running and owns the data: the MCP server. The model's job is to **set a watch up** and to **read the result**; running it is code's.
+
+The same argument decides where each half runs. The server is the part that must not stop, so it goes on a machine that does not stop; the agent is a program you open and close, so it runs where you are. Nothing about the protocol changes between the two - an MCP server on a VPS is a URL, exactly as DeepWiki is - which is the point of putting the scheduler behind MCP rather than inside the app.
 
 That split is also the answer to "why is this an MCP tool at all rather than a cron job": the tool is the scheduler's *interface*. The model says what to watch in words, the tool turns that into a row in `watches`, and a week later the same model reads back an aggregate it did not have to compute.
 
@@ -166,8 +168,8 @@ Everything here is shaped by the fact that it will be restarted, often, at bad m
 
 - **A missed run is made up once.** Each watch keeps `next_run_at` in the database. A server that was down through its slot runs once when it comes back (`catch-up`), and the next slot is computed from *now* - a week of downtime is one run, not seven.
 - **A run interrupted mid-way is not left "running".** On start, any run still marked running is marked `interrupted`.
-- **Delivery has a cursor, on the app's side of the wire.** `data/digests/state.json` remembers the last digest posted. Restart the app and it carries on; restart the server and nothing is posted twice. The log carries a `db_id`, and a cursor into a database that no longer exists is thrown away rather than trusted.
-- **A backlog is not replayed.** An app pointed at a server with fifty digests it has never seen posts the newest three and records the rest as skipped - otherwise the first start would buy fifty model calls.
+- **Delivery has cursors, on the app's side of the wire.** `data/digests/state.json` remembers, per watch, the last digest posted and where its "new" ended. Restart the app and it carries on; restart the server and nothing is posted twice. The log carries a `db_id`, and cursors into a database that no longer exists are thrown away rather than trusted.
+- **Coming back is one digest, not a backlog.** The agent is off most of the time - that is the design. Open it after a week and each watch may have seven digests waiting. Posting them in a row would be seven stale messages and seven model calls, so the courier asks the server for one aggregate instead: `get_summary(new_since=<where the last delivered digest ended>)`, everything first seen since then, counted by the server. It arrives as a single digest marked *while the agent was offline (7 digests in one)*.
 - **One source down is a partial run, not a failed one.** The error goes into the run and into the digest ("could not read: …"); the other eight carry on.
 
 ### The Digests chat
@@ -178,27 +180,54 @@ Because it is an ordinary conversation, you can reply to it: "tell me more about
 
 The badge on **Events** counts digests posted while you were away. Opening the Digests chat is reading them.
 
-### Deploying it: three processes on a VPS
+### Deploying it: the server on a VPS, the agent at home
+
+**On the VPS** (Ubuntu, with a domain pointing at it and a certificate for it - certbot's paths are assumed below):
 
 ```bash
-git clone https://github.com/mostfus/ai_advent_challange.git
+sudo apt update && sudo apt install -y git docker.io docker-compose-v2
+git clone -b day18-mcp-scheduler https://github.com/mostfus/ai_advent_challange.git
 cd ai_advent_challange/day18-mcp-scheduler
-cp .env.example .env            # DEEPSEEK_API_KEY at least
-docker compose up -d --build
+cp .env.vps.example .env
+openssl rand -hex 32            # paste into EVENTS_TOKEN; set EVENTS_PUBLIC_HOST and the cert paths
+sudo ufw allow 8788/tcp         # if ufw is on
+sudo docker compose up -d --build
+sudo docker compose logs -f     # "... on https://<domain>:8788/mcp - bearer token required"
 ```
 
-Then, from your own machine:
+(If `docker-compose-v2` is not in your release's repositories, Docker's own installer brings both: `curl -fsSL https://get.docker.com | sudo sh`.)
+
+From anywhere, a request without the token is refused - which is how to check it is up:
 
 ```bash
-ssh -N -L 8000:127.0.0.1:8000 you@your-vps     # and open http://localhost:8000
+curl -i -X POST https://<domain>:8788/mcp      # HTTP/1.1 401 Unauthorized
 ```
 
-One image, three services - `agent`, `events`, `maps` - with `network_mode: host`, so every address is the one it is in development and all three listen on **127.0.0.1 only**. The web UI has no login, and that is the security model: nothing is reachable from outside the VPS, and the SSH tunnel is the way in. `restart: unless-stopped` is the "24/7" - a crash is restarted, and so is everything after a reboot - and `./data` is the volume that outlives the containers.
+**On your machine**, in the agent's `.env`:
 
-```bash
-docker compose logs -f events agent   # [events] watch 1 schedule: ok, 131 listed, 4 new
-docker compose ps
 ```
+EVENTS_MCP_URL=https://<domain>:8788/mcp
+EVENTS_MCP_TOKEN=<the same token>
+```
+
+then `uv run server.py` as always. The MCP panel shows the events server at its remote address; tell the agent what to follow, close the laptop, and open it again tomorrow.
+
+What makes the server safe to put on the internet, since it now is:
+
+- **It refuses to start unsafe.** On anything but localhost it needs `EVENTS_TOKEN` (24+ characters), `EVENTS_PUBLIC_HOST` and a certificate, and exits with the reason otherwise (`server_config`).
+- **The token is checked on every request**, in constant time, before the MCP layer sees anything (`BearerAuth`). It is a shared secret with one user, so it is a header and not the SDK's OAuth machinery - an authorization server and client registration would be protecting a server with exactly one client.
+- **TLS is uvicorn's own**, with your certificate - no reverse proxy to configure. certbot renews the files but a running process keeps the old ones, so add a deploy hook that restarts the container after each renewal:
+
+  ```bash
+  printf '#!/bin/sh\ndocker restart day18-events\n' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/day18-events.sh
+  sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/day18-events.sh
+  ```
+- **The Host header is pinned** to your domain - the SDK's DNS-rebinding protection, pointed at a public name instead of localhost.
+- **The token never leaves `.env`** on either side. The app adds it to requests to that one server and does not write it under `data/` or send it to the browser.
+
+`restart: unless-stopped` is the "24/7": a crash is restarted, and so is the server after a reboot, and a run missed while it was down is made up once. `./data` on the VPS holds the database and outlives the container.
+
+For local development nothing of this is needed: leave `EVENTS_MCP_URL` empty and run `uv run events_mcp_server.py` next to the app, on 127.0.0.1 with no token.
 
 ### What is deliberately not here
 
@@ -1850,7 +1879,7 @@ Since day 18 there is a third, and it is the one that makes the agent work while
 uv run events_mcp_server.py    # http://127.0.0.1:8788/mcp
 ```
 
-Then tell the agent what you want to follow ("jazz and theatre in Cape Town, every morning") and watch the **Events** panel. For a server rather than a laptop, see [Deploying it](#deploying-it-three-processes-on-a-vps) - three processes under `docker compose`, reached over an SSH tunnel.
+Then tell the agent what you want to follow ("jazz and theatre in Cape Town, every morning") and watch the **Events** panel. That is the development setup; the real one has this server on a VPS and the agent connecting to it - see [Deploying it](#deploying-it-the-server-on-a-vps-the-agent-at-home).
 
 It is a separate process because an MCP server *is* a separate thing: the agent reaches it over HTTP exactly as it reaches DeepWiki, and a server that only ever ran inside this app would be a function with extra steps. Stop it and the panel's row goes red with the reason; the rest of the app carries on. Send a message, stop the server with `Ctrl-C`, start it again, reload the page: the conversation is still there, and the agent still knows what is in it.
 
@@ -1952,7 +1981,7 @@ The scheduler itself is not a page, so it has tests of its own, in Python and wi
 uv run python -m unittest discover -s tests -v
 ```
 
-They cover the three parsers (four date shapes, a site that stamps local time as UTC, an iCal offset spelled as a zone name, online and cancelled events dropped), the area filter, the clock (a week of downtime is **one** catch-up run; an on-demand run does not move the schedule; a run interrupted by a crash is not left "running"), what counts as new, one source down being a partial run, dedup across listings, whole-word interest matching, and the courier - each digest delivered once across restarts, a backlog not replayed, a recreated database resetting the cursor, a failed delivery retried.
+They cover the three parsers (four date shapes, a site that stamps local time as UTC, an iCal offset spelled as a zone name, online and cancelled events dropped), the area filter, the clock (a week of downtime is **one** catch-up run; an on-demand run does not move the schedule; a run interrupted by a crash is not left "running"), what counts as new, one source down being a partial run, dedup across listings, whole-word interest matching, the courier - each digest delivered once across restarts, several waiting for one watch arriving as **one** catch-up that starts where the last delivered digest ended, a watch deleted meanwhile represented by its newest digest, one watch failing without holding back or repeating another, a recreated database resetting the cursors - and serving: localhost needs nothing, a public address is refused without a token, TLS and a host name, and a request without the right token never reaches the MCP layer.
 
 To add a check, call `check("what it should do", <condition>, <detail>)` — a failure sets the exit code.
 

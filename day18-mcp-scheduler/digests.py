@@ -10,16 +10,21 @@ half a minute and posts whatever is new into one chat, "Digests".
 Three decisions in it, each of which is the difference between a demo and
 something that can be left running:
 
-  * **The cursor is ours and on disk.** The server's log is append-only and
-    reading it changes nothing, so the app remembers the last digest it
-    delivered (`data/digests/state.json`). Restart the app and it carries on
-    from there; restart the server and nothing is delivered twice. The log's
-    `db_id` changes if the database is recreated, and a cursor into a database
-    that no longer exists is thrown away rather than trusted.
-  * **A backlog is not replayed.** An app that was down for a week, or that is
-    pointed at an existing database for the first time, would otherwise post
-    fifty digests in a row and pay for fifty model calls. It posts the newest
-    `MAX_BACKLOG` and skips the rest, and says so in the state.
+  * **The cursors are ours and on disk.** The server's log is append-only and
+    reading it changes nothing, so the app remembers, per watch, the last
+    digest it delivered (`data/digests/state.json`). Restart the app and it
+    carries on from there; restart the server and nothing is delivered twice.
+    The log's `db_id` changes if the database is recreated, and cursors into a
+    database that no longer exists are thrown away rather than trusted.
+  * **Coming back is one digest, not a backlog.** The server runs 24/7 and
+    this app does not: it is started when somebody wants it. A laptop closed
+    for a week comes back to seven digests per watch, and posting them in a
+    row would be seven stale messages and seven model calls. So when a watch
+    has more than one waiting, the courier asks the server for **one**
+    aggregate - `get_summary(new_since=...)`, everything first seen since the
+    last digest this app actually delivered - and posts that as a single
+    "while you were away" digest. The server counts it; nothing is merged or
+    re-counted on this side.
   * **The model writes; if it cannot, the template does.** The numbers are
     already exact - the server counted them - so a failed model call costs the
     digest its prose, not its content. `fallback_text` renders the same
@@ -49,7 +54,9 @@ DEFAULT_POLL_SECONDS = 30
 #: again. The server may simply not be up yet; asking every tick would be a
 #: log line every thirty seconds for as long as it is down.
 CATALOGUE_RETRY_SECONDS = 300
-MAX_BACKLOG = 3
+#: "Since the beginning" - what a catch-up asks for when this app has never
+#: delivered anything for a watch.
+EPOCH = "1970-01-01T00:00:00+00:00"
 
 SYSTEM_PROMPT = (
     "You write a short digest of upcoming events for one person, from data a "
@@ -62,6 +69,7 @@ TRIGGERS = {
     "schedule": "scheduled run",
     "catch-up": "catch-up run after downtime",
     "on-demand": "run you asked for",
+    "reconnect": "everything new while the agent was offline",
 }
 
 
@@ -90,6 +98,7 @@ def prompt(summary: dict, trigger: str) -> str:
         "events_shown": len(events),
         "events_not_shown": summary.get("omitted", 0),
         "errors": summary.get("errors") or [],
+        "digests_combined": summary.get("covers") or 1,
         "events": events,
     }
     return (
@@ -152,9 +161,12 @@ class DigestState:
         return {
             "db_id": data.get("db_id") or "",
             "cursor": int(data.get("cursor") or 0),
+            # Per watch: the last digest delivered, and where its "new" ended.
+            "cursors": dict(data.get("cursors") or {}),
+            "cuts": dict(data.get("cuts") or {}),
+            "combined": int(data.get("combined") or 0),
             "unread": int(data.get("unread") or 0),
             "delivered": int(data.get("delivered") or 0),
-            "skipped": int(data.get("skipped") or 0),
             "last_delivered_at": data.get("last_delivered_at") or "",
             "last_poll_at": data.get("last_poll_at") or "",
             "last_error": data.get("last_error") or "",
@@ -170,24 +182,25 @@ class DigestState:
             return data
 
 
-def select(log: dict, state: dict) -> tuple[list[dict], dict]:
-    """Which digests in the server's log are still to be delivered.
+def select(log: dict, state: dict) -> tuple[list[tuple[str, list[dict]]], dict]:
+    """What in the server's log is still to be delivered, grouped by watch.
 
-    Returns them oldest first, and the fields of the state that change: a new
-    `db_id` if the database is not the one the cursor belongs to, and how many
-    were skipped as backlog.
+    Returns `[(watch_id, [digest, ...oldest first]), ...]` in the order the
+    newest digest of each watch was written, and the state fields that change
+    if the database is not the one the cursors belong to.
     """
     changes: dict = {}
-    cursor = state["cursor"]
+    cursors = state["cursors"]
     if log.get("db_id") != state["db_id"]:
-        changes["db_id"] = log.get("db_id") or ""
-        changes["cursor"] = cursor = 0
-    pending = [d for d in log.get("digests") or [] if int(d.get("id") or 0) > cursor]
-    pending.sort(key=lambda d: int(d["id"]))
-    if len(pending) > MAX_BACKLOG:
-        changes["skipped"] = state["skipped"] + len(pending) - MAX_BACKLOG
-        pending = pending[-MAX_BACKLOG:]
-    return pending, changes
+        changes.update(db_id=log.get("db_id") or "", cursors={}, cuts={}, cursor=0)
+        cursors = {}
+    groups: dict = {}
+    for digest in sorted(log.get("digests") or [], key=lambda d: int(d.get("id") or 0)):
+        watch = str(digest.get("watch_id"))
+        if int(digest.get("id") or 0) > int(cursors.get(watch) or 0):
+            groups.setdefault(watch, []).append(digest)
+    ordered = sorted(groups.items(), key=lambda item: int(item[1][-1]["id"]))
+    return ordered, changes
 
 
 class Courier(threading.Thread):
@@ -199,10 +212,14 @@ class Courier(threading.Thread):
     """
 
     def __init__(self, read_log, deliver, state: DigestState | None = None,
-                 interval: float | None = None) -> None:
+                 interval: float | None = None, catch_up=None) -> None:
         super().__init__(name="digest-courier", daemon=True)
         self.read_log = read_log
         self.deliver = deliver
+        # `catch_up(watch_id, since_iso)` -> the server's aggregate of
+        # everything new since then, or None if the watch no longer exists.
+        # Without one, every waiting digest is delivered as it is.
+        self.catch_up = catch_up
         self.state = state or DigestState()
         self.interval = poll_seconds() if interval is None else interval
         self.stopping = threading.Event()
@@ -213,7 +230,7 @@ class Courier(threading.Thread):
             self.poll_once()
 
     def poll_once(self) -> int:
-        """One look. Returns how many digests were delivered. Never raises."""
+        """One look. Returns how many messages were posted. Never raises."""
         with self.poll_lock:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             try:
@@ -222,25 +239,53 @@ class Courier(threading.Thread):
                 self.state.update(last_poll_at=now, last_error=str(err)[:300])
                 return 0
             state = self.state.load()
-            pending, changes = select(log, state)
+            groups, changes = select(log, state)
             if changes:
                 state = self.state.update(**changes)
-            delivered = 0
-            for digest in pending:
+            posted = 0
+            for watch, waiting in groups:
                 try:
-                    self.deliver(digest)
-                except Exception as err:  # noqa: BLE001 - try this one again next tick
-                    self.state.update(last_poll_at=now, last_error=f"delivering #{digest.get('id')}: {err}"[:300])
-                    return delivered
-                delivered += 1
+                    entries = self.plan(watch, waiting, state)
+                    for entry in entries:
+                        self.deliver(entry)
+                        posted += 1
+                except Exception as err:  # noqa: BLE001 - this watch is tried again next tick
+                    self.state.update(last_poll_at=now,
+                                      last_error=f"delivering for watch {watch}: {err}"[:300])
+                    return posted
+                last = waiting[-1]
                 state = self.state.update(
-                    cursor=int(digest["id"]),
-                    unread=state["unread"] + 1,
-                    delivered=state["delivered"] + 1,
+                    cursor=max(state["cursor"], int(last["id"])),
+                    cursors={**state["cursors"], watch: int(last["id"])},
+                    cuts={**state["cuts"], watch: (last.get("summary") or {}).get("cut_at") or ""},
+                    unread=state["unread"] + len(entries),
+                    delivered=state["delivered"] + len(entries),
+                    combined=state["combined"] + (len(waiting) if len(waiting) > 1 and len(entries) == 1 else 0),
                     last_delivered_at=now,
                 )
             self.state.update(last_poll_at=now, last_error="")
-            return delivered
+            return posted
+
+    def plan(self, watch: str, waiting: list[dict], state: dict) -> list[dict]:
+        """What to post for one watch: its digest, or one catch-up for many."""
+        if len(waiting) == 1 or self.catch_up is None:
+            return waiting
+        since = state["cuts"].get(watch) or EPOCH
+        summary = self.catch_up(int(watch), since)
+        if summary is None:
+            # The watch is gone; its newest digest stands for the rest.
+            return [waiting[-1]]
+        last = waiting[-1]
+        errors = sorted({e for d in waiting for e in (d.get("summary") or {}).get("errors") or []})
+        return [{
+            "id": last["id"],
+            "watch_id": last.get("watch_id"),
+            "trigger": "reconnect",
+            "created_at": last.get("created_at"),
+            "summary": {**summary, "trigger": "reconnect", "errors": errors,
+                        "cut_at": (last.get("summary") or {}).get("cut_at") or "",
+                        "covers": len(waiting), "since": since},
+        }]
 
     def stop(self) -> None:
         self.stopping.set()

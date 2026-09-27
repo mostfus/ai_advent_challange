@@ -78,6 +78,7 @@ then open http://127.0.0.1:8000
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from contextlib import asynccontextmanager
@@ -251,6 +252,60 @@ mcp_servers.seed(
 )
 
 
+# Day 18: the events server is meant to run somewhere else - a VPS, 24/7 -
+# and this app to connect to it when it runs. Where it is and the token it
+# wants come from `.env`, like every other secret here: the URL is written
+# into the MCP panel's record (it is not a secret, and the panel should show
+# where the tools come from), the token never is. It is added to each request
+# by `client_for`, so it is never on disk under data/ and never sent to the
+# browser.
+EVENTS_URL_ENV = "EVENTS_MCP_URL"
+EVENTS_TOKEN_ENV = "EVENTS_MCP_TOKEN"
+
+
+def events_url() -> str:
+    return (os.getenv(EVENTS_URL_ENV) or "").strip()
+
+
+def point_events_server() -> None:
+    url = events_url()
+    if not url:
+        return
+    current = mcp_servers.find(digests_module.EVENTS_SERVER_ID)
+    if current is not None and current.url == url:
+        return
+    if current is None:
+        server = McpServer(id=digests_module.EVENTS_SERVER_ID, label="Cape Town events (remote)", url=url)
+    else:
+        # A new address is a different server until it answers: the old
+        # catalogue described the old one.
+        server = McpServer(id=current.id, label="Cape Town events (remote)", url=url,
+                           enabled=current.enabled, created_at=current.created_at,
+                           catalogue={"ok": False, "error": "address changed - not fetched yet"})
+    try:
+        mcp_servers.upsert(server)
+    except StoreError as exc:
+        print(f"[events] could not point the events server at {url}: {exc}")
+
+
+point_events_server()
+
+
+def client_for(server_id: str, url: str, timeout: float | None = None) -> mcp_client.MCPClient:
+    """An MCP client for one server, carrying its token if it has one.
+
+    Only the events server has one, and only when `.env` says so - which is
+    also the only place the token lives.
+    """
+    headers = {}
+    token = (os.getenv(EVENTS_TOKEN_ENV) or "").strip()
+    if token and (server_id == digests_module.EVENTS_SERVER_ID or (events_url() and url == events_url())):
+        headers["Authorization"] = f"Bearer {token}"
+    if timeout is None:
+        return mcp_client.MCPClient(url, headers=headers)
+    return mcp_client.MCPClient(url, timeout=timeout, headers=headers)
+
+
 # --------------------------------------------------------------------------
 # Day 17: from a catalogue to something the model can actually call
 # --------------------------------------------------------------------------
@@ -291,7 +346,7 @@ class Toolbox:
                 transport_error="unknown tool",
             )
         server_id, url, tool_name = route
-        result = mcp_client.MCPClient(url).call_tool(tool_name, arguments)
+        result = client_for(server_id, url).call_tool(tool_name, arguments)
         print(f"[mcp] {server_id}/{tool_name} -> "
               f"{'ok' if result.ok else 'error'} in {result.elapsed_ms} ms")
         return result
@@ -2397,7 +2452,7 @@ def fetch_catalogue(server: McpServer) -> dict:
     is down is a red line on a row and not an error dialog over four rows that
     are fine.
     """
-    listing = mcp_client.MCPClient(server.url).list_tools()
+    listing = client_for(server.id, server.url).list_tools()
     mcp_servers.record_listing(server.id, listing.to_dict(server.id))
     return listing.to_dict(server.id)
 
@@ -2485,7 +2540,7 @@ def events_server() -> McpServer | None:
     """The events server as connected in the MCP panel, if it is."""
     known = next(k for k in mcp_client.KNOWN_SERVERS if k["id"] == digests_module.EVENTS_SERVER_ID)
     for server in mcp_servers.load():
-        if server.id == digests_module.EVENTS_SERVER_ID or server.url == known["url"]:
+        if server.id == digests_module.EVENTS_SERVER_ID or server.url in (known["url"], events_url()):
             return server
     return None
 
@@ -2513,7 +2568,7 @@ def read_digest_log() -> dict:
             _time.time() - _catalogue_tried["at"] > digests_module.CATALOGUE_RETRY_SECONDS:
         _catalogue_tried["at"] = _time.time()
         fetch_catalogue(server)
-    return json.loads(mcp_client.MCPClient(server.url).read_resource(digests_module.DIGESTS_URI))
+    return json.loads(client_for(server.id, server.url).read_resource(digests_module.DIGESTS_URI))
 
 
 def write_digest(summary: dict, trigger: str) -> AgentReply:
@@ -2556,6 +2611,9 @@ def deliver_digest(entry: dict) -> None:
             "trigger": trigger,
             "created_at": entry.get("created_at"),
             "written_by": written_by,
+            # How many of the server's digests this one message stands for:
+            # more than one after the agent was offline (see digests.Courier).
+            "covers": int(summary.get("covers") or 1),
             "summary": summary,
         },
         settings=Settings().model_dump(),
@@ -2567,9 +2625,30 @@ def deliver_digest(entry: dict) -> None:
     print(f"[digests] #{entry.get('id')} ({trigger}) delivered, written by the {written_by}")
 
 
+def catch_up_summary(watch_id: int, since: str) -> dict | None:
+    """Everything new for one watch since `since`, counted by the server.
+
+    What the courier asks for when it comes back to several digests for the
+    same watch: one aggregate instead of a row of stale messages. None means
+    the watch was deleted meanwhile; anything else that goes wrong raises, and
+    the courier tries again on the next tick.
+    """
+    server = events_server()
+    if server is None or not server.enabled:
+        raise RuntimeError("the events server is not connected")
+    result = client_for(server.id, server.url).call_tool("get_summary", {
+        "watch_id": watch_id, "new_since": since, "days_ahead": 30, "limit": 25,
+    })
+    if result.ok and result.structured:
+        return result.structured
+    if not result.transport_error and "there is no watch" in (result.text or ""):
+        return None
+    raise RuntimeError(result.transport_error or result.text or "get_summary failed")
+
+
 digest_state = digests_module.DigestState()
 courier = (
-    digests_module.Courier(read_digest_log, deliver_digest, digest_state)
+    digests_module.Courier(read_digest_log, deliver_digest, digest_state, catch_up=catch_up_summary)
     if digests_module.poll_seconds() > 0 else None
 )
 
@@ -2579,7 +2658,7 @@ def call_events_tool(name: str, arguments: dict | None = None) -> dict:
     server = events_server()
     if server is None or not server.enabled:
         raise HTTPException(409, "The events server is not connected or is switched off (MCP panel)")
-    result = mcp_client.MCPClient(server.url).call_tool(name, arguments or {})
+    result = client_for(server.id, server.url).call_tool(name, arguments or {})
     if not result.ok:
         raise HTTPException(502 if result.transport_error else 400,
                             result.transport_error or result.text or f"{name} failed")
@@ -2605,7 +2684,7 @@ def events_report() -> dict:
     if server is None or not server.enabled:
         report["error"] = "The events server is not connected, or is switched off in the MCP panel."
         return report
-    result = mcp_client.MCPClient(server.url, timeout=10).call_tool("list_watches", {})
+    result = client_for(server.id, server.url, timeout=10).call_tool("list_watches", {})
     if result.ok and result.structured:
         report["watches"] = result.structured.get("watches") or []
         report["now"] = result.structured.get("now") or ""
@@ -2657,7 +2736,8 @@ def poll_digests() -> dict:
     The same `poll_once` the thread runs, so pressing it cannot deliver
     anything the timer would not have - it only saves the wait.
     """
-    poller = courier or digests_module.Courier(read_digest_log, deliver_digest, digest_state, interval=0)
+    poller = courier or digests_module.Courier(read_digest_log, deliver_digest, digest_state,
+                                               interval=0, catch_up=catch_up_summary)
     delivered = poller.poll_once()
     return {"delivered": delivered, **events_report()}
 

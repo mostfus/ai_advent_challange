@@ -1,5 +1,7 @@
-# Day 18: one image, three processes - the agent app and its two MCP servers.
-# docker-compose.yml runs it three times with a different command each.
+# Day 18: the image for the VPS. What runs there is the events MCP server -
+# the part that has to work 24/7. The agent itself runs wherever you are and
+# connects to it over HTTPS. (The image carries the whole folder, so the same
+# image can run `python server.py` too, but docker-compose.yml does not.)
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -24,4 +26,4 @@ COPY static ./static
 # container, so it is a volume.
 VOLUME ["/app/data"]
 
-CMD ["python", "server.py"]
+CMD ["python", "events_mcp_server.py"]

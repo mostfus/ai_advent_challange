@@ -282,9 +282,10 @@ class Courier(unittest.TestCase):
         self.tmp.cleanup()
 
     @staticmethod
-    def log(db_id: str, *ids: int) -> dict:
+    def log(db_id: str, *ids: int, watch_of=None) -> dict:
         return {"db_id": db_id, "digests": [
-            {"id": i, "watch_id": 1, "trigger": "schedule", "created_at": "", "summary": {}} for i in ids]}
+            {"id": i, "watch_id": (watch_of or {}).get(i, 1), "trigger": "schedule", "created_at": "",
+             "summary": {"cut_at": f"2026-10-0{min(i, 9)}T05:00:00+00:00"}} for i in ids]}
 
     def test_each_digest_is_delivered_once_across_polls_and_restarts(self):
         posted = []
@@ -297,18 +298,58 @@ class Courier(unittest.TestCase):
         self.assertEqual([d["id"] for d in posted], [1, 2, 3])
         self.assertEqual(self.state.load()["unread"], 3)
 
-    def test_a_backlog_is_not_replayed(self):
-        posted = []
-        digests.Courier(lambda: self.log("a", *range(1, 11)), posted.append, self.state, interval=0).poll_once()
-        self.assertEqual([d["id"] for d in posted], [8, 9, 10])
-        self.assertEqual(self.state.load()["skipped"], 7)
+    def test_coming_back_to_several_digests_is_one_catch_up_per_watch(self):
+        posted, asked = [], []
 
-    def test_a_recreated_database_resets_the_cursor(self):
-        self.state.update(db_id="old", cursor=40)
+        def catch_up(watch_id, since):
+            asked.append((watch_id, since))
+            return {"watch_name": "Jazz", "counts": {"new": 5}, "events": []}
+
+        log = self.log("a", 1, 2, 3, 4, watch_of={4: 2})
+        digests.Courier(lambda: log, posted.append, self.state, interval=0, catch_up=catch_up).poll_once()
+        # Watch 1 had three waiting: one aggregate from the server, since the
+        # beginning because nothing was ever delivered. Watch 2 had one: as is.
+        self.assertEqual(asked, [(1, digests.EPOCH)])
+        self.assertEqual([(d["id"], d["trigger"]) for d in posted], [(3, "reconnect"), (4, "schedule")])
+        self.assertEqual(posted[0]["summary"]["covers"], 3)
+        state = self.state.load()
+        self.assertEqual((state["cursors"], state["combined"], state["unread"]), ({"1": 3, "2": 4}, 3, 2))
+
+    def test_a_catch_up_starts_where_the_last_delivered_digest_ended(self):
+        self.state.update(db_id="a", cursors={"1": 4}, cuts={"1": "2026-10-04T05:00:00+00:00"})
+        asked = []
+        catch_up = lambda watch_id, since: asked.append(since) or {"counts": {"new": 1}, "events": []}  # noqa: E731
+        digests.Courier(lambda: self.log("a", 3, 4, 5, 6), lambda d: None, self.state,
+                        interval=0, catch_up=catch_up).poll_once()
+        self.assertEqual(asked, ["2026-10-04T05:00:00+00:00"])
+        self.assertEqual(self.state.load()["cuts"]["1"], "2026-10-06T05:00:00+00:00")
+
+    def test_a_watch_deleted_meanwhile_is_represented_by_its_newest_digest(self):
+        posted = []
+        digests.Courier(lambda: self.log("a", 1, 2), posted.append, self.state, interval=0,
+                        catch_up=lambda watch_id, since: None).poll_once()
+        self.assertEqual([(d["id"], d["trigger"]) for d in posted], [(2, "schedule")])
+
+    def test_one_watch_failing_does_not_hold_back_or_repeat_another(self):
+        posted = []
+
+        def deliver(digest):
+            if digest["watch_id"] == 2:
+                raise RuntimeError("model down")
+            posted.append(digest["id"])
+
+        courier = digests.Courier(lambda: self.log("a", 1, 2, watch_of={2: 2}), deliver, self.state, interval=0)
+        self.assertEqual(courier.poll_once(), 1)
+        self.assertEqual(self.state.load()["cursors"], {"1": 1})
+        courier.poll_once()
+        self.assertEqual(posted, [1])  # watch 1 is not posted twice while watch 2 keeps failing
+
+    def test_a_recreated_database_resets_the_cursors(self):
+        self.state.update(db_id="old", cursor=40, cursors={"1": 40})
         posted = []
         digests.Courier(lambda: self.log("new", 1), posted.append, self.state, interval=0).poll_once()
         self.assertEqual([d["id"] for d in posted], [1])
-        self.assertEqual((self.state.load()["db_id"], self.state.load()["cursor"]), ("new", 1))
+        self.assertEqual((self.state.load()["db_id"], self.state.load()["cursors"]), ("new", {"1": 1}))
 
     def test_a_failed_delivery_is_retried_on_the_next_tick(self):
         calls = {"n": 0}
@@ -339,6 +380,44 @@ class Courier(unittest.TestCase):
         for part in ("1 new", "jazz: 1", "Quartet - Fri 2 Oct, 18:30, Alma", "https://a.test/q",
                      "2 more", "luma: HTTP 503", "HTTP 401"):
             self.assertIn(part, text)
+
+
+class Serving(unittest.TestCase):
+    """How the server may be exposed - the part that makes it safe to put on a VPS."""
+
+    GOOD = {"EVENTS_HOST": "0.0.0.0", "EVENTS_PUBLIC_HOST": "events.example.com",
+            "EVENTS_TOKEN": "x" * 40, "EVENTS_SSL_CERTFILE": "/c.pem", "EVENTS_SSL_KEYFILE": "/k.pem"}
+
+    def test_localhost_needs_nothing(self):
+        config = ev.server_config({})
+        self.assertEqual((config.local, config.url), (True, "http://127.0.0.1:8788/mcp"))
+
+    def test_a_public_address_needs_a_token_tls_and_a_host_name(self):
+        for missing in ("EVENTS_TOKEN", "EVENTS_PUBLIC_HOST", "EVENTS_SSL_CERTFILE", "EVENTS_SSL_KEYFILE"):
+            env = {k: v for k, v in self.GOOD.items() if k != missing}
+            with self.assertRaises(SystemExit) as refused:
+                ev.server_config(env)
+            self.assertIn(missing, str(refused.exception))
+        with self.assertRaises(SystemExit):
+            ev.server_config({**self.GOOD, "EVENTS_TOKEN": "short"})
+        self.assertEqual(ev.server_config(self.GOOD).url, "https://events.example.com:8788/mcp")
+
+    def test_the_token_is_checked_on_every_request(self):
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        inner = Starlette(routes=[Route("/mcp", lambda request: PlainTextResponse("ok"), methods=["POST"])])
+        client = TestClient(ev.BearerAuth(inner, "s" * 40))
+        self.assertEqual(client.post("/mcp").status_code, 401)
+        self.assertEqual(client.post("/mcp", headers={"Authorization": "Bearer wrong"}).status_code, 401)
+        ok = client.post("/mcp", headers={"Authorization": "Bearer " + "s" * 40})
+        self.assertEqual((ok.status_code, ok.text), (200, "ok"))
+
+    def test_a_public_app_is_wrapped_in_the_token_check(self):
+        app = ev.build_app(ev.server_config(self.GOOD))
+        self.assertIsInstance(app, ev.BearerAuth)
 
 
 class StoredDigests(unittest.TestCase):

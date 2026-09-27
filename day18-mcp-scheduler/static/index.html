@@ -4407,6 +4407,7 @@
       "schedule": "scheduled run",
       "catch-up": "catch-up run after downtime",
       "on-demand": "run you asked for",
+      "reconnect": "while the agent was offline",
     };
 
     function drawDigest(message) {
@@ -4415,7 +4416,8 @@
       head.appendChild(makeEl("b", null, "\u23f0 Digest #" + (digest.id || "?")));
       head.appendChild(document.createTextNode(
         " \u00b7 " + (digest.watch_name || "watch") + " \u00b7 "
-        + (TRIGGER_LABELS[digest.trigger] || digest.trigger || "") + " \u00b7 "
+        + (TRIGGER_LABELS[digest.trigger] || digest.trigger || "")
+        + (digest.covers > 1 ? " (" + digest.covers + " digests in one)" : "") + " \u00b7 "
         + (digest.created_at || "").replace("T", " ")
         + " \u00b7 written by the " + (digest.written_by || "model")));
       transcript.appendChild(head);

@@ -38,16 +38,25 @@ Two kinds of execution, both in the brief:
     digest, which the agent app picks up from the `events://digests` resource
     and posts into its "Digests" chat.
 
-Run it next to the agent:
+It is meant to live **somewhere else**. The agent is a program you start
+when you want it; this server runs 24/7 on a VPS, and the agent connects to
+it over the internet when it runs - to set up watches, and to pick up
+everything collected while it was away. Two ways to start it:
 
-    uv run events_mcp_server.py        # http://127.0.0.1:8788/mcp
+    uv run events_mcp_server.py        # development: http://127.0.0.1:8788/mcp
 
-No API key. The database is `data/events/events.db` (override: EVENTS_DB).
+    # on a server (see `server_config`): HTTPS, a bearer token, your domain
+    EVENTS_HOST=0.0.0.0 EVENTS_PUBLIC_HOST=events.example.com \
+    EVENTS_TOKEN=... EVENTS_SSL_CERTFILE=... EVENTS_SSL_KEYFILE=... \
+    uv run events_mcp_server.py        # https://events.example.com:8788/mcp
+
+No API key of its own. The database is `data/events/events.db` (EVENTS_DB).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import html
 import json
 import math
@@ -72,6 +81,7 @@ import httpx
 from dotenv import load_dotenv
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
 # httpx logs every request at INFO; one line per listing per run is the
@@ -1188,7 +1198,11 @@ def run_watch(db: EventsDB, watch: dict, trigger: str, now: datetime | None = No
         digest_id = None
         if trigger == "on-demand" or summary.counts.new:
             payload = summary.model_dump()
-            payload.update({"trigger": trigger, "errors": errors, "run_id": run_id})
+            # `cut_at` is where this digest's "new" ends: an event first seen
+            # after it is new to the next one. The app keeps it, so that after
+            # a long absence it can ask for everything since the last digest
+            # it actually delivered (`get_summary(new_since=...)`).
+            payload.update({"trigger": trigger, "errors": errors, "run_id": run_id, "cut_at": iso(now)})
             digest_id = conn.execute(
                 "INSERT INTO digests (watch_id, run_id, trigger, created_at, payload) VALUES (?, ?, ?, ?, ?)",
                 (watch["id"], run_id, trigger, iso(finished), json.dumps(payload, ensure_ascii=False)),
@@ -1487,6 +1501,9 @@ def get_summary(
         "Only events first seen since this watch's last digest."))] = False,
     interest: Annotated[str, Field(description="Narrow to one of the watch's interests, or any word.")] = "",
     limit: Annotated[int, Field(ge=1, le=MAX_EVENTS_IN_SUMMARY, description="How many event cards.")] = DEFAULT_SUMMARY_EVENTS,
+    new_since: Annotated[str, Field(description=(
+        "ISO time: count as new what was first seen after it, instead of after the "
+        "last digest. Implies only_new. Used to catch up after a long absence."))] = "",
 ) -> Summary:
     """Aggregated upcoming events from what is already collected - instant, no fetching.
 
@@ -1501,8 +1518,14 @@ def get_summary(
         watch = watches[0] if watches else None
     else:
         watch = require_watch(watch_id)
+    since = None
+    if new_since:
+        since = from_iso(new_since)
+        if since is None:
+            raise ToolError(f"new_since must be an ISO date-time, got {new_since!r}")
+        only_new = True
     return summarise(get_db(), watch, now=utcnow(), days_ahead=days_ahead, only_new=only_new,
-                     interest=interest, limit=limit)
+                     interest=interest, limit=limit, new_since=since)
 
 
 @mcp.resource("events://digests", name="digests", title="Digests waiting to be delivered",
@@ -1526,12 +1549,126 @@ def digests_resource() -> str:
     }, ensure_ascii=False)
 
 
+# --------------------------------------------------------------------------
+# Serving it: on this machine, or on the internet
+# --------------------------------------------------------------------------
+#
+# On 127.0.0.1 nothing is needed - the SDK's own DNS-rebinding protection
+# covers localhost. On a public address three things become non-negotiable,
+# and the server refuses to start without them rather than start unsafe:
+#
+#   * a bearer token - otherwise anyone who finds the URL can schedule jobs
+#     on your server and read what it collected;
+#   * TLS - a token sent over plain HTTP is a token anybody on the path reads;
+#   * the public host name - so a request for any other Host is refused.
+
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+@dataclass
+class ServeConfig:
+    host: str
+    port: int
+    public_host: str = ""
+    token: str = ""
+    certfile: str = ""
+    keyfile: str = ""
+
+    @property
+    def local(self) -> bool:
+        return self.host in LOCAL_HOSTS
+
+    @property
+    def url(self) -> str:
+        if self.local:
+            return f"http://{self.host}:{self.port}{ENDPOINT}"
+        return f"https://{self.public_host}:{self.port}{ENDPOINT}"
+
+
+def server_config(env: dict | None = None) -> ServeConfig:
+    """Where and how to serve, from the environment - or why it must not."""
+    env = os.environ if env is None else env
+    config = ServeConfig(
+        host=(env.get("EVENTS_HOST") or HOST).strip(),
+        port=int(env.get("EVENTS_PORT") or PORT),
+        public_host=(env.get("EVENTS_PUBLIC_HOST") or "").strip(),
+        token=(env.get("EVENTS_TOKEN") or "").strip(),
+        certfile=(env.get("EVENTS_SSL_CERTFILE") or "").strip(),
+        keyfile=(env.get("EVENTS_SSL_KEYFILE") or "").strip(),
+    )
+    if config.local:
+        return config
+    missing = [name for name, value in (
+        ("EVENTS_TOKEN", config.token),
+        ("EVENTS_PUBLIC_HOST", config.public_host),
+        ("EVENTS_SSL_CERTFILE", config.certfile),
+        ("EVENTS_SSL_KEYFILE", config.keyfile),
+    ) if not value]
+    if missing:
+        raise SystemExit(f"refusing to listen on {config.host} without {', '.join(missing)}: "
+                         "a public MCP server needs a token, TLS and its host name")
+    if len(config.token) < 24:
+        raise SystemExit("EVENTS_TOKEN is too short - use at least 24 random characters "
+                         "(e.g. `openssl rand -hex 32`)")
+    return config
+
+
+class BearerAuth:
+    """Plain ASGI: every HTTP request must carry `Authorization: Bearer <token>`.
+
+    Not the SDK's OAuth machinery - that is an authorization server, client
+    registration and scopes, for servers with many users. This one has one
+    user and one secret, and the honest implementation of that is a constant-
+    time comparison. Lifespan events pass straight through, so the scheduler
+    still starts with the server.
+    """
+
+    def __init__(self, app, token: str) -> None:
+        self.app = app
+        self.expected = f"Bearer {token}".encode()
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            given = dict(scope.get("headers") or []).get(b"authorization", b"")
+            if not hmac.compare_digest(given, self.expected):
+                body = b'{"error": "missing or wrong bearer token"}'
+                await send({"type": "http.response.start", "status": 401, "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"www-authenticate", b'Bearer realm="cape-town-events"'),
+                    (b"content-length", str(len(body)).encode()),
+                ]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
+def build_app(config: ServeConfig):
+    """The SDK's Streamable HTTP app, with the public host pinned and the token checked."""
+    security = None
+    if not config.local:
+        security = TransportSecuritySettings(
+            allowed_hosts=[config.public_host, f"{config.public_host}:*"],
+            allowed_origins=[f"https://{config.public_host}", f"https://{config.public_host}:*"],
+        )
+    app = mcp.streamable_http_app(streamable_http_path=ENDPOINT, json_response=True,
+                                  transport_security=security, host=config.host)
+    return BearerAuth(app, config.token) if config.token else app
+
+
 def main() -> None:
+    import uvicorn
+
     load_dotenv()
+    config = server_config()
     get_db()
-    print(f"Cape Town events MCP server on http://{HOST}:{PORT}{ENDPOINT} - database {get_db().path}")
-    mcp.run(transport="streamable-http", host=HOST, port=PORT,
-            streamable_http_path=ENDPOINT, json_response=True)
+    print(f"Cape Town events MCP server on {config.url} - database {get_db().path}"
+          + (" - bearer token required" if config.token else ""))
+    # `json_response`: every answer is one application/json body rather than
+    # an SSE stream - these tools have nothing to stream. The client handles
+    # both anyway (day 16).
+    uvicorn.run(build_app(config), host=config.host, port=config.port,
+                ssl_certfile=config.certfile or None, ssl_keyfile=config.keyfile or None,
+                log_level="info")
 
 
 if __name__ == "__main__":
