@@ -199,7 +199,7 @@ cd ai_advent_challange/day18-mcp-scheduler
 uv sync --frozen --python 3.11                         # fetches Python 3.11 into ~ if the system has another
 cp .env.vps.example .env
 sed -i "s/^EVENTS_TOKEN=.*/EVENTS_TOKEN=$(openssl rand -hex 32)/" .env
-grep EVENTS_TOKEN .env                                 # the value goes into the agent's .env at home
+grep ^EVENTS_TOKEN .env                                # the value goes into the agent's .env at home
 ./keepalive.sh install                                 # into your crontab, and started
 ./keepalive.sh status                                  # "... Uvicorn running on http://127.0.0.1:8788" / "running, pid ..."
 ```
