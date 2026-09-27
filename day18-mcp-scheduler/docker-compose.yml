@@ -1,0 +1,37 @@
+# Day 18 on a VPS: three processes from one image, all bound to 127.0.0.1.
+#
+#   docker compose up -d --build
+#   ssh -N -L 8000:127.0.0.1:8000 you@your-vps     # then open http://localhost:8000
+#
+# `network_mode: host` keeps every address exactly as it is in development -
+# the app reaches the MCP servers on 127.0.0.1:8787/8788 - and, because all
+# three listen on 127.0.0.1 only, nothing is reachable from outside the VPS.
+# The web UI has no login, so that is the security model: the SSH tunnel.
+#
+# `restart: unless-stopped` is the "24/7": a crash is restarted, and so is
+# everything after a reboot. What a restart costs is covered by the app
+# itself - the scheduler catches up a missed run once, and the courier's
+# cursor is on disk, so nothing is collected or delivered twice.
+
+x-service: &service
+  build: .
+  image: day18-mcp-scheduler
+  env_file: .env
+  volumes:
+    - ./data:/app/data
+  network_mode: host
+  restart: unless-stopped
+
+services:
+  events:
+    <<: *service
+    command: ["python", "events_mcp_server.py"]
+
+  maps:
+    <<: *service
+    command: ["python", "maps_mcp_server.py"]
+
+  agent:
+    <<: *service
+    command: ["python", "server.py"]
+    depends_on: [events, maps]
