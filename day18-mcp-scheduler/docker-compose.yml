@@ -1,6 +1,8 @@
-# Day 18 on a VPS: the events MCP server, and nothing else.
+# Day 18 on a VPS where you have root: the events MCP server, served over
+# HTTPS on your domain, and nothing else. Without root, skip this file -
+# keepalive.sh and an SSH tunnel do the same job (README, "Deploying it").
 #
-#   cp .env.vps.example .env      # domain, token, certificate paths
+#   cp .env.vps.example .env      # token, then uncomment the HTTPS block
 #   docker compose up -d --build
 #
 # The agent is not here on purpose. It runs on your own machine, when you

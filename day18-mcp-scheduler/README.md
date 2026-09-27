@@ -81,16 +81,16 @@ Every tool so far - ours on day 17, other people's on day 16 - is a function. Th
 
 This day gives it something to do while nobody is asking. `events_mcp_server.py` is a second MCP server of our own, and the first one with a **clock**: it watches Cape Town's event listings on a schedule, keeps what it finds in SQLite, and every run that turns up something new leaves a **digest** behind.
 
-And it lives **somewhere else**. The server runs 24/7 on a VPS; the agent is this app, started on your own machine when you want it. It connects to the server over HTTPS - the way it connects to DeepWiki - to set watches up, and when it comes back after a day or a week it picks up everything collected meanwhile and posts it into a chat called **Digests**, written by the model.
+And it lives **somewhere else**. The server runs 24/7 on a VPS; the agent is this app, started on your own machine when you want it. It reaches the server through an SSH tunnel - to the agent it is one more MCP URL, as DeepWiki is - to set watches up, and when it comes back after a day or a week it picks up everything collected meanwhile and posts it into a chat called **Digests**, written by the model.
 
 ```
-YOUR MACHINE (when you want it)                     VPS (24/7)
+YOUR MACHINE (when you want it)                     VPS (24/7, an ordinary user, no root)
 ────────────────────────────────                    ──────────────────────────────────────────
-you  "Follow jazz and theatre in Cape Town,         events_mcp_server.py   https://<domain>:8788/mcp
-      every morning."                                 ├─ Bearer token, TLS, Host pinned
+you  "Follow jazz and theatre in Cape Town,         events_mcp_server.py   127.0.0.1:8788/mcp
+      every morning."                                 ├─ kept up by cron + keepalive.sh
         │                                             ├─ Scheduler thread: daily at 07:00 Cape Town
 agent.py ─► DeepSeek ─► create_watch{...} ── MCP ──►  ├─ collectors: JSON-LD · Events Calendar · iCal
-                                           HTTPS      ├─ SQLite: watches · events · runs · digests
+                                      ssh -L tunnel   ├─ SQLite: watches · events · runs · digests
 server.py ─ digests.Courier ◄── events://digests ──   └─ keeps collecting while the agent is off
    │   "anything new since my cursor?"
    ▼
@@ -182,50 +182,63 @@ The badge on **Events** counts digests posted while you were away. Opening the D
 
 ### Deploying it: the server on a VPS, the agent at home
 
-**On the VPS** (Ubuntu, with a domain pointing at it and a certificate for it - certbot's paths are assumed below):
+All the VPS needs is an ordinary user you can `ssh` in as - no root, no open port, no certificate. The server listens on the VPS's own `127.0.0.1`, and your machine reaches it through an SSH tunnel: ssh is already the encryption and the login, so the server adds neither.
+
+```
+your machine                                        VPS
+agent ─► http://127.0.0.1:8788/mcp ─► ssh -L ─────► 127.0.0.1:8788  events_mcp_server.py
+```
+
+**On the VPS**, as that user:
 
 ```bash
-sudo apt update && sudo apt install -y git docker.io docker-compose-v2
+curl -LsSf https://astral.sh/uv/install.sh | sh        # uv, into ~/.local/bin - no root
+export PATH="$HOME/.local/bin:$PATH"
 git clone -b day18-mcp-scheduler https://github.com/mostfus/ai_advent_challange.git
 cd ai_advent_challange/day18-mcp-scheduler
+uv sync --frozen --python 3.11                         # fetches Python 3.11 into ~ if the system has another
 cp .env.vps.example .env
-openssl rand -hex 32            # paste into EVENTS_TOKEN; set EVENTS_PUBLIC_HOST and the cert paths
-sudo ufw allow 8788/tcp         # if ufw is on
-sudo docker compose up -d --build
-sudo docker compose logs -f     # "... on https://<domain>:8788/mcp - bearer token required"
+sed -i "s/^EVENTS_TOKEN=.*/EVENTS_TOKEN=$(openssl rand -hex 32)/" .env
+grep EVENTS_TOKEN .env                                 # the value goes into the agent's .env at home
+./keepalive.sh install                                 # into your crontab, and started
+./keepalive.sh status                                  # "... Uvicorn running on http://127.0.0.1:8788" / "running, pid ..."
 ```
 
-(If `docker-compose-v2` is not in your release's repositories, Docker's own installer brings both: `curl -fsSL https://get.docker.com | sudo sh`.)
+`keepalive.sh` is the supervisor you can have without root. There is no systemd service to install, so it is cron and `flock`: cron runs the script every five minutes, and the server holds a lock for as long as it lives - so while it is up the script does nothing, and after a crash or a reboot it starts it again. A run missed meanwhile is made up once, as above. It starts the server in a session of its own, so logging out of ssh does not take it down. To update: `git pull && uv sync --frozen && ./keepalive.sh restart`. The log is `data/server.log`, cut in place at 5 MB; `./keepalive.sh uninstall` takes it out of the crontab and stops it.
 
-From anywhere, a request without the token is refused - which is how to check it is up:
+**On your machine**, the tunnel - in `~/.ssh/config`:
+
+```
+Host events-vps
+    HostName <the VPS's address>
+    User <your user there>
+    LocalForward 8788 127.0.0.1:8788
+    ExitOnForwardFailure yes
+    ServerAliveInterval 30
+```
+
+`ssh -N events-vps` opens it and holds it for as long as it runs (add `-f` to send it to the background). If 8788 is taken on your machine - by a local events server, say - pick any other number on the left of `LocalForward` and use it in the URL below. Then, in the agent's `.env`:
+
+```
+EVENTS_MCP_URL=http://127.0.0.1:8788/mcp
+EVENTS_MCP_TOKEN=<the EVENTS_TOKEN from the VPS>
+```
+
+and `uv run server.py` as always. The MCP panel shows *Cape Town events (remote)*; tell the agent what to follow, close the laptop, and open it again tomorrow - tunnel first. With the tunnel down the Events panel shows the connection error and the rest of the app carries on; once it is back, the courier picks up where it stopped, and a watch that ran several times meanwhile arrives as one digest.
+
+Why this is safe enough:
+
+- **Nothing is on the internet.** The server listens on 127.0.0.1; the only port open is SSH's, which was open already.
+- **ssh is the encryption and the login.** Only someone who can log in as you can open the tunnel.
+- **The token is still checked** - in constant time, before the MCP layer sees anything (`BearerAuth`) - because every program on the VPS can reach its 127.0.0.1 too. It lives in `.env` on both sides and nowhere else: the app adds it to requests to that one server, and never writes it under `data/` or sends it to the browser.
+- **The Host header is checked.** The SDK's DNS-rebinding protection admits `127.0.0.1` and `localhost` on any port - which is what a request through the tunnel carries - and nothing else.
+
+**With root**, the same server can instead be served over HTTPS on your domain, with no tunnel: fill in the HTTPS block of `.env.vps.example` and `docker compose up -d --build`, and the agent gets `EVENTS_MCP_URL=https://<domain>:8788/mcp`. On a public address the server refuses to start without a token of 24+ characters, the host name and a certificate (`server_config`); it serves TLS itself, pins the Host header to the domain, and `restart: unless-stopped` stands in for cron. certbot renews the certificate but a running process keeps the old one, so add a deploy hook that restarts the container:
 
 ```bash
-curl -i -X POST https://<domain>:8788/mcp      # HTTP/1.1 401 Unauthorized
+printf '#!/bin/sh\ndocker restart day18-events\n' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/day18-events.sh
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/day18-events.sh
 ```
-
-**On your machine**, in the agent's `.env`:
-
-```
-EVENTS_MCP_URL=https://<domain>:8788/mcp
-EVENTS_MCP_TOKEN=<the same token>
-```
-
-then `uv run server.py` as always. The MCP panel shows the events server at its remote address; tell the agent what to follow, close the laptop, and open it again tomorrow.
-
-What makes the server safe to put on the internet, since it now is:
-
-- **It refuses to start unsafe.** On anything but localhost it needs `EVENTS_TOKEN` (24+ characters), `EVENTS_PUBLIC_HOST` and a certificate, and exits with the reason otherwise (`server_config`).
-- **The token is checked on every request**, in constant time, before the MCP layer sees anything (`BearerAuth`). It is a shared secret with one user, so it is a header and not the SDK's OAuth machinery - an authorization server and client registration would be protecting a server with exactly one client.
-- **TLS is uvicorn's own**, with your certificate - no reverse proxy to configure. certbot renews the files but a running process keeps the old ones, so add a deploy hook that restarts the container after each renewal:
-
-  ```bash
-  printf '#!/bin/sh\ndocker restart day18-events\n' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/day18-events.sh
-  sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/day18-events.sh
-  ```
-- **The Host header is pinned** to your domain - the SDK's DNS-rebinding protection, pointed at a public name instead of localhost.
-- **The token never leaves `.env`** on either side. The app adds it to requests to that one server and does not write it under `data/` or send it to the browser.
-
-`restart: unless-stopped` is the "24/7": a crash is restarted, and so is the server after a reboot, and a run missed while it was down is made up once. `./data` on the VPS holds the database and outlives the container.
 
 For local development nothing of this is needed: leave `EVENTS_MCP_URL` empty and run `uv run events_mcp_server.py` next to the app, on 127.0.0.1 with no token.
 
