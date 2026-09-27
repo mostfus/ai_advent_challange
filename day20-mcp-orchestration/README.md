@@ -229,19 +229,33 @@ A flow worth routing needs servers that know different things. The weather is wh
 - **`weather_mcp_server.py`** - Open-Meteo, chosen because it needs no key and no account: a day about orchestrating servers should not start with a sign-up form. Per day: temperatures, chance and amount of rain, wind, and the same for 17:00-22:00, because an evening out is decided by the evening. The verdict - dry, showers possible, rain - is a threshold, so it is code, not the model. Place names go through Open-Meteo's geocoder, which knows cities and districts, not streets; `lat,lng` for anything exact.
 - **`planner_mcp_server.py`** - `save_plan(title, day, steps[])` writes `data/plans/<id>.md` and `.json`. It checks the two things a model assembling a plan out of four other tools' answers gets wrong: the steps are in **time order** (dinner at 17:30 after a concert at 19:30 is refused, with both steps named, so the model fixes the plan rather than the file holding a wrong one), and the day is not in the past.
 
-Four local servers are four terminals, so one command starts them all:
+Four local servers were four terminals, and a flow over four servers is exactly where one of them is forgotten. So **`uv run server.py` starts them itself** and stops them when it stops:
 
-```bash
-uv run run_mcp_servers.py                   # maps, events, weather, planner
-uv run run_mcp_servers.py weather planner   # just these
+```
+$ uv run server.py
+[maps   ] starting http://127.0.0.1:8787/mcp  (pid 469)
+[events ] starting http://127.0.0.1:8788/mcp  (pid 471)
+[weather] starting http://127.0.0.1:8789/mcp  (pid 473)
+[planner] starting http://127.0.0.1:8790/mcp  (pid 475)
+…
+[mcp] cape-town-events: 7 tools
+[mcp] google-maps: 3 tools
+[mcp] weather: 1 tools
+[mcp] planner: 4 tools
 ```
 
-(The events server is skipped when `EVENTS_MCP_URL` points at your VPS.) Then **MCP → refresh**, or **Scenarios → Refresh servers**, which asks every server switched on for its tools at once (`POST /api/mcp/refresh`).
+Each is still a process of its own, reached over HTTP like DeepWiki - the app presses the button, it does not swallow the server. The app does not wait for them: once their ports answer, a background thread asks each for its tools, so the first message carries their catalogues with nobody pressing refresh, and a server that fails to start is a red row in the MCP panel rather than an app that will not boot. Three rules:
+
+- **a port that already answers is used and left alone** - started in another terminal, or the events server kept running 24/7 on its own - and is not stopped on the way out, because it was not the app's to stop;
+- **the events server is skipped when `EVENTS_MCP_URL` points at your VPS**;
+- **`MCP_AUTOSTART=0`** in `.env` switches it off. Then start them by hand, all at once or some - `uv run run_mcp_servers.py [maps events weather planner]` - and press **Scenarios → Refresh servers** (`POST /api/mcp/refresh`, every server switched on at once).
+
+DeepWiki is not refreshed at boot: it is on the internet, and an app that contacted somebody else's server every time it started would be doing it on your behalf without being asked.
 
 ### Checking it
 
 ```bash
-uv run python -m unittest discover -s tests -v   # test_orchestration.py: 30 tests
+uv run python -m unittest discover -s tests -v   # test_orchestration.py: 34 tests
 npm test                                         # the page: the flow, the cards, the Scenarios panel
 ```
 
@@ -249,7 +263,7 @@ npm test                                         # the page: the flow, the cards
 
 The second half is the long flow over the wire. **Four real MCP servers** - events, weather, maps, planner - each on its own port, reached over HTTP by the hand-written client exactly as the app reaches them; only the world outside them is fake (Google and Open-Meteo answering from dicts, a temp events database with two jazz nights, one on a rainy evening). The model is a script that **reads the tool results it is given**: it picks the concert on the evening the weather server says is dry, meets at the place `plan_meetup` ranks first, measures the trip from there to the venue the listing gave, and saves a plan out of all of it. Then the test reads **the plan on disk**: the dry day, dinner at the fairest place, the venue, "13 min by car" - so a value lost or changed between two servers shows up as a wrong file, not as a log line. And `evening-out`'s 15 checks pass against that flow.
 
-With real keys: `uv run run_mcp_servers.py`, `uv run server.py`, **Scenarios → Run in a new chat**.
+With real keys: `uv run server.py`, **Scenarios → Run in a new chat**.
 
 ### What is deliberately not here
 
@@ -2175,13 +2189,7 @@ uv run events_mcp_server.py    # http://127.0.0.1:8788/mcp
 
 Then tell the agent what you want to follow ("jazz and theatre in Cape Town, every morning") and watch the **Events** panel.
 
-Since day 20 there are four of ours - add the weather server (`:8789`) and the planner (`:8790`) - and one command for all of them:
-
-```bash
-uv run run_mcp_servers.py      # maps :8787, events :8788, weather :8789, planner :8790
-```
-
-Then **Scenarios → Refresh servers**, and run one. That is the development setup; the real one has this server on a VPS and the agent connecting to it - see [Deploying it](#deploying-it-the-server-on-a-vps-the-agent-at-home).
+**Since day 20 you do not have to**: `uv run server.py` starts all four of ours - maps `:8787`, events `:8788`, weather `:8789`, planner `:8790` - fetches their tools, and stops them when you stop it. A server already running on its port is used and left running, and `MCP_AUTOSTART=0` in `.env` turns this off (then `uv run run_mcp_servers.py` starts them by hand). One consequence worth knowing: an events server the app started stops with the app, so its schedule only runs while the app does - for 24/7, run it on its own (or on the VPS) and the app will find it. That is the development setup; the real one has this server on a VPS and the agent connecting to it - see [Deploying it](#deploying-it-the-server-on-a-vps-the-agent-at-home).
 
 It is a separate process because an MCP server *is* a separate thing: the agent reaches it over HTTP exactly as it reaches DeepWiki, and a server that only ever ran inside this app would be a function with extra steps. Stop it and the panel's row goes red with the reason; the rest of the app carries on. Send a message, stop the server with `Ctrl-C`, start it again, reload the page: the conversation is still there, and the agent still knows what is in it.
 

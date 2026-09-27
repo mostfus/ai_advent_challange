@@ -81,6 +81,7 @@ import json
 import os
 import re
 import sys
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,6 +101,7 @@ import memory as memory_module
 import orchestrator as orchestrator_module
 import personality as personality_module
 import phases as phases_module
+import run_mcp_servers
 import scenarios as scenarios_module
 import store as store_module
 import strategies
@@ -146,11 +148,47 @@ async def lifespan(_app: FastAPI):
     and the courier exists for as long as the process does, which is the
     whole of what "24/7" means on this side of the wire.
     """
+    local = start_local_servers()
     if courier is not None:
         courier.start()
     yield
     if courier is not None:
         courier.stop()
+    if local is not None:
+        local.stop()
+
+
+def start_local_servers() -> "run_mcp_servers.LocalServers | None":
+    """Day 20: start this folder's MCP servers with the app, stop them with it.
+
+    `uv run server.py` is the one command: maps, events, weather and planner
+    come up as processes of their own - an MCP server is still a separate
+    thing, reached over HTTP like DeepWiki - and go down when the app does. A
+    port that already answers is used and left alone (the events server may
+    be running 24/7 on its own); `EVENTS_MCP_URL` pointing at a VPS skips the
+    local one; `MCP_AUTOSTART=0` switches all of it off.
+
+    The app does not wait for them. They come up in a second or two, and a
+    background thread then asks each one for its tools - so the first message
+    carries their catalogues without anybody pressing refresh, and a server
+    that fails to start is a red row in the MCP panel, not an app that will
+    not boot.
+    """
+    if not run_mcp_servers.autostart_enabled():
+        return None
+    local = run_mcp_servers.LocalServers(log=lambda line: print(line, flush=True)).start()
+
+    def warm_up() -> None:
+        ready = set(local.wait_ready())
+        for server in mcp_servers.load():
+            if server.id in ready and server.enabled:
+                listing = fetch_catalogue(server)
+                print(f"[mcp] {server.id}: "
+                      + (f"{len(listing['tools'])} tools" if listing["ok"] else listing["error"]),
+                      flush=True)
+
+    threading.Thread(target=warm_up, name="mcp-warm-up", daemon=True).start()
+    return local
 
 
 app = FastAPI(title="LLM Agent with a scheduler, context strategies and branches", lifespan=lifespan)
