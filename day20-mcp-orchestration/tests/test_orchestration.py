@@ -727,3 +727,58 @@ class LongFlowTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------
+# `uv run server.py` starts the local servers - the rules, with nothing spawned
+# --------------------------------------------------------------------------
+
+
+class LocalServersTest(unittest.TestCase):
+    def setUp(self) -> None:
+        import run_mcp_servers
+
+        self.module = run_mcp_servers
+        self.saved = dict(run_mcp_servers.SERVERS)
+        self.env = {k: os.environ.get(k) for k in ("EVENTS_MCP_URL", run_mcp_servers.AUTOSTART_ENV)}
+
+    def tearDown(self) -> None:
+        self.module.SERVERS.clear()
+        self.module.SERVERS.update(self.saved)
+        for key, value in self.env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def test_a_port_that_already_answers_is_used_and_not_stopped(self) -> None:
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        try:
+            self.module.SERVERS["weather"] = ("weather_mcp_server.py", listener.getsockname()[1], "weather")
+            lines: list = []
+            local = self.module.LocalServers(["weather"], log=lines.append).start()
+            self.assertEqual((local.found, local.started), (["weather"], {}))
+            self.assertEqual(local.wait_ready(timeout=2), ["weather"])
+            local.stop()
+            self.assertIn("leaving it running", lines[0])
+        finally:
+            listener.close()
+
+    def test_the_events_server_is_skipped_when_it_lives_elsewhere(self) -> None:
+        os.environ["EVENTS_MCP_URL"] = "http://127.0.0.1:9788/mcp"
+        local = self.module.LocalServers(["events"], log=lambda _: None).start()
+        self.assertIn("EVENTS_MCP_URL", local.skipped["events"])
+        self.assertEqual(local.started, {})
+        os.environ["EVENTS_MCP_URL"] = "http://127.0.0.1:8788/mcp"   # the local one, by name
+        self.assertEqual(self.module.events_elsewhere(), "")
+
+    def test_autostart_can_be_switched_off(self) -> None:
+        for value, expected in (("", True), ("1", True), ("0", False), ("off", False), ("false", False)):
+            os.environ[self.module.AUTOSTART_ENV] = value
+            self.assertEqual(self.module.autostart_enabled(), expected, value)
+
+    def test_an_unknown_name_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            self.module.LocalServers(["maps", "nope"])

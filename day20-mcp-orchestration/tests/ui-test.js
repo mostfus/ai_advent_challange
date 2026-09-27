@@ -96,6 +96,10 @@ async function startServer() {
         // the suite's result depend on whether an events server happens to be
         // running on this machine. The day-18 act drives `poll` by hand.
         DIGEST_POLL_SECONDS: "0",
+        // Day 20: the app starts this folder's MCP servers itself. Not here -
+        // they would bind the real ports and write the real data/ - and the
+        // suite never calls a tool anyway.
+        MCP_AUTOSTART: "0",
       },
       stdio: "inherit",
     }
