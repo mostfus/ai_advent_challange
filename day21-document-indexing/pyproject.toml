@@ -1,0 +1,14 @@
+[project]
+name = "day21-document-indexing"
+version = "0.1.0"
+description = "An LLM agent with a local document index - markdown, python and text files chunked two ways (fixed size and by structure), embedded with bge-m3 over Ollama and stored with their metadata in SQLite, with a retrieval check comparing the two - that orchestrates five MCP servers - routing each call, running long flows across them and checking their order - runs a five-step pipeline behind one MCP tool, calls tools on a local MCP server of its own over Google Maps, reads the tool catalogue off other people's MCP servers, will not break the rules you wrote down, whose tasks are an explicit state machine, over a three-layer memory model and a switchable personality, with a web GUI on top"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "mcp>=1.12",
+    "numpy>=2.2.6",
+    "python-dotenv==1.2.3",
+    "tzdata>=2025.2",
+    "uvicorn[standard]>=0.52.4",
+]
