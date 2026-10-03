@@ -1,0 +1,37 @@
+# Day 18 on a VPS where you have root: the events MCP server, served over
+# HTTPS on your domain, and nothing else. Without root, skip this file -
+# keepalive.sh and an SSH tunnel do the same job (README, "Deploying it").
+#
+#   cp .env.vps.example .env      # token, then uncomment the HTTPS block
+#   docker compose up -d --build
+#
+# The agent is not here on purpose. It runs on your own machine, when you
+# want it, and connects to https://<your domain>:<port>/mcp with the token -
+# the way it connects to DeepWiki. This server is the part that must not stop:
+# it runs the watches on schedule whether or not any agent is connected, and
+# keeps everything it collected for the next time one is.
+#
+# `restart: unless-stopped` is the "24/7": a crash is restarted, and so is the
+# server after a reboot. A run missed while it was down is made up once when
+# it comes back. `./data` holds the SQLite database and outlives the container.
+
+services:
+  events:
+    build: .
+    image: day18-events-server
+    container_name: day18-events
+    command: ["python", "events_mcp_server.py"]
+    env_file: .env
+    environment:
+      # Inside the container it must listen on all interfaces for the port
+      # below to reach it. With a public address the server refuses to start
+      # without a token, TLS and the host name - see events_mcp_server.server_config.
+      EVENTS_HOST: 0.0.0.0
+    ports:
+      - "${EVENTS_PORT:-8788}:${EVENTS_PORT:-8788}"
+    volumes:
+      - ./data:/app/data
+      # certbot's certificates, read-only. live/ holds symlinks into archive/,
+      # which is why the whole directory is mounted rather than one file.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    restart: unless-stopped
