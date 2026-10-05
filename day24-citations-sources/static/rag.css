@@ -1,0 +1,104 @@
+/* Day 22: the RAG tab. Built on the Index tab's ix-* styles and the chat
+   page's colour tokens; only what is specific to answers side by side.
+   Day 23: three of them, the judge's candidates, and the threshold sweep. */
+#rag-view {
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.rg-trio {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+@media (max-width: 1100px) {
+  .rg-trio { grid-template-columns: minmax(0, 1fr); }
+}
+
+.rg-answer {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rg-answer-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.rg-answer-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.rg-answer-text.error { color: var(--ix-bad); }
+
+.rg-sources {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rg-hit { border-left: 3px solid transparent; padding-left: 8px; }
+.rg-hit.cited { border-left-color: var(--accent); }
+.rg-hit.right .rg-n { color: var(--ix-good); }
+.rg-hit-head { font-size: 12.5px; word-break: break-word; }
+.rg-n { display: inline-block; min-width: 24px; font-weight: 700; }
+.rg-hit-preview { word-break: break-word; }
+.rg-tag { margin-left: 6px; font-size: 11px; padding: 0 6px; }
+.rg-chips { gap: 4px; flex-wrap: wrap; }
+
+.rg-prompt pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--ix-code-bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 6px 0 0;
+}
+
+.rg-detail > td { background: var(--bg); }
+.rg-detail-body { display: flex; flex-direction: column; gap: 10px; padding: 6px 2px; }
+.rg-expect { display: flex; flex-direction: column; gap: 4px; line-height: 1.45; }
+
+.rg-kw td.rg-yes { color: var(--ix-good); }
+.rg-kw td.rg-no { color: var(--ix-bad); }
+
+.rg-editor { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.rg-editor textarea, .rg-editor input[type="text"] { width: 100%; box-sizing: border-box; }
+.rg-summary { max-width: 820px; }
+.rg-summary tr.rg-group td {
+  font-weight: 600;
+  padding-top: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rg-empty { color: var(--ix-warn, var(--text-muted)); }
+.rg-cands summary { cursor: pointer; font-size: 12.5px; }
+.rg-cand-table { font-size: 12px; margin-top: 6px; }
+.rg-cand-table td { word-break: break-word; }
+.rg-cand-table tr.rg-kept td { color: var(--text); }
+.rg-cand-table tr.rg-cut td { opacity: 0.6; }
+.rg-reply {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+  background: var(--ix-code-bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 6px 0 0;
+}
+
+.rg-sweep { max-width: 820px; }
+.rg-sweep tr.rg-current td { background: var(--ix-code-bg); font-weight: 600; }
+.rg-sweep tr.rg-used td:first-child { color: var(--accent); }

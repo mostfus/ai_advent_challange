@@ -1,0 +1,14 @@
+[project]
+name = "day24-citations-sources"
+version = "0.1.0"
+description = "An LLM agent that answers from its own document index when asked to (RAG: the nearest chunks joined onto the question, cited by number - since day 24 answered as JSON with sources resolved to file, section and chunk id and quotes looked up in the chunks they name, asked again once when the evidence is missing, and an I-don't-know with a clarifying question when no chunk reaches the relevance threshold, drawn in the chat as Markdown with each quote a click away from its chunk - and, since day 23, reranked: more candidates than are sent, each scored 0-10 for the question by a judge model, the ones under a threshold cut, possibly all of them - with control questions, three of them with no answer in the documents, comparing the answers without the index, with its top k and with the reranked cut, and a sweep of every threshold over the stored scores), with a local document index - markdown, python and text files chunked two ways (fixed size and by structure), embedded with bge-m3 over Ollama and stored with their metadata in SQLite, with a retrieval check comparing the two - that orchestrates five MCP servers - routing each call, running long flows across them and checking their order - runs a five-step pipeline behind one MCP tool, calls tools on a local MCP server of its own over Google Maps, reads the tool catalogue off other people's MCP servers, will not break the rules you wrote down, whose tasks are an explicit state machine, over a three-layer memory model and a switchable personality, with a web GUI on top"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "mcp>=1.12",
+    "numpy>=2.2.6",
+    "python-dotenv==1.2.3",
+    "tzdata>=2025.2",
+    "uvicorn[standard]>=0.52.4",
+]
