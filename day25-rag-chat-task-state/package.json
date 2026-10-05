@@ -1,0 +1,11 @@
+{
+  "name": "day25-ui-tests",
+  "private": true,
+  "description": "Headless jsdom checks for the agent chat UI, its RAG chat's task state, its answers drawn as Markdown with their sources, quotes and popups, its RAG mode and tab with the reranked third mode, its document index, its flows across several MCP servers and their scenarios, its meeting-point pipeline, its MCP tool calls and catalogue, its invariants, its task state machine, its memory layers, its personality profiles, its context strategies, its branches and its token readout",
+  "scripts": {
+    "test": "node tests/ui-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0"
+  }
+}
