@@ -82,7 +82,7 @@ The brief: **add a local LLM**. llama.cpp was the user's pick, configured in cod
 Every model up to now was somebody else's computer: a POST to `api.deepseek.com`, a key in `.env`, a bill per token. llama.cpp's `llama-server` loads a GGUF file onto the Mac's GPU (Metal) and answers the same OpenAI-compatible `/v1/chat/completions` this app has spoken since day 6. So the agent does not change at all. What changes is **which URL a request goes to, and that is decided by the model id alone**:
 
 ```
-settings.model == "local-qwen3-8b"  ─▶  LlamaCppClient  ─▶  http://127.0.0.1:8081/v1/chat/completions   (llama-server, Qwen3-8B Q4_K_M)
+settings.model == "local-qwen3-8b"  ─▶  LlamaCppClient  ─▶  http://127.0.0.1:8081/v1/chat/completions   (llama-server, Qwen3-8B Q8_0)
 anything else                       ─▶  DeepSeekClient  ─▶  https://api.deepseek.com/chat/completions
 ```
 
@@ -96,7 +96,7 @@ anything else                       ─▶  DeepSeekClient  ─▶  https://api.
   "binary": "llama-server",
   "host": "127.0.0.1",
   "port": 8081,
-  "hf_repo": "Qwen/Qwen3-8B-GGUF:Q4_K_M",
+  "hf_repo": "Qwen/Qwen3-8B-GGUF:Q8_0",
   "model_path": "",
   "context_size": 16384,
   "parallel": 2,
@@ -124,7 +124,7 @@ anything else                       ─▶  DeepSeekClient  ─▶  https://api.
 | `flash_attn` | `on` / `off` / `auto` |
 | `sampling` | `top_p`, `top_k`, `min_p`, `repeat_penalty` as server defaults (Qwen's recommended values). Temperature is not here: it comes from the chat's own setting, as it does for DeepSeek |
 | `extra_args` | anything else for the command line, verbatim |
-| `startup_timeout_seconds` | how long to wait for `/health` (a first start includes the 5 GB download) |
+| `startup_timeout_seconds` | how long to wait for `/health` (a first start includes the download: 8.7 GB for Q8_0) |
 | `request_timeout_seconds` | how long one answer may take — a local 8B model reading 20 reranker candidates needs far longer than the cloud |
 
 An unknown field is an error at startup, not a silently ignored typo. `LOCAL_LLM_AUTOSTART=0` in `.env` overrides `autostart` (the tests set it). The command the config comes to is printed in the app's log:
@@ -141,7 +141,9 @@ Two flags are not configurable because the app depends on them: `--jinja` (the m
 
 ### Why Qwen3-8B
 
-On an M4 Pro with 24 GB: Q4_K_M is 5 GB, the KV cache for 2 × 16k tokens about 4.5 GB, and that leaves room for everything else. Qwen3 writes Russian well, supports tool calls and JSON mode through llama.cpp, and has a thinking switch. Measured here: **~46 tokens/s** generation, **~210 tokens/s** on the prompt, about 2 s to load from the cache.
+On an M4 Pro with 24 GB. Qwen3 writes Russian well, supports tool calls and JSON mode through llama.cpp, and has a thinking switch. The day was built and measured on **Q4_K_M** (5 GB): **~46 tokens/s** generation, **~210 tokens/s** on the prompt, about 2 s to load from the cache. The config has since moved to **Q8_0** (8.7 GB, practically lossless): with the KV cache for 2 × 16k tokens (about 4.5 GB) that is ~13 GB, which still fits, at the price of slower generation; it has not been measured here.
+
+**The quantization is the file, not a flag.** The weights are quantized ahead of time, so changing it means loading another GGUF: the suffix of `hf_repo` (`Q4_K_M`, `Q5_K_M`, `Q6_K`, `Q8_0`, `BF16` in Qwen's own repo; more in community repos such as `unsloth/Qwen3-8B-GGUF`), or a file of your own made with `llama-quantize` and set as `model_path`. The KV cache is quantized separately, through `extra_args`: `["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]` halves it.
 
 ### One client, routed by the model
 
@@ -156,7 +158,7 @@ On an M4 Pro with 24 GB: Q4_K_M is 5 GB, the KV cache for 2 × 16k tokens about 
 - **Single chat** — ⚙ Settings has a **Model** field at the top now. Until today the single chat always answered on the default; picking a model was only possible in a compare column. The choice is the chat's own setting, stored with it, and a new chat starts from the last one picked.
 - **Compare models** — each column's Model list has the local id too. A column is local or not by its model alone, so "Send to all" asks DeepSeek and Qwen the same thing side by side.
 
-In both, the local id is labelled `local-qwen3-8b · local (llama.cpp)`, and picking it shows what is loaded, where, and whether the server is up: *Runs on this machine: Qwen/Qwen3-8B-GGUF:Q4_K_M on http://127.0.0.1:8081 · ready — loaded. Configured in local_llm.json.* Nothing about the model can be changed there.
+In both, the local id is labelled `local-qwen3-8b · local (llama.cpp)`, and picking it shows what is loaded, where, and whether the server is up: *Runs on this machine: Qwen/Qwen3-8B-GGUF:Q8_0 on http://127.0.0.1:8081 · ready — loaded. Configured in local_llm.json.* Nothing about the model can be changed there.
 
 ### Live — the same questions, two models
 
@@ -186,7 +188,7 @@ npm test                                         # + the Model field in the sing
 
 `test_local_llm.py` checks the config (the shipped file loads, no file = no local model, an unknown field is an error), the command line (`-hf` or `-m`, alias, `context_size × parallel`, `--jinja`, sampling flags, `extra_args`), the translation (`off` → thinking off, other levels → on, nothing else touched, no bearer), the error when nothing is listening, and the routing (the local id goes local, everything else and a missing model go to DeepSeek, no local model = all remote). Days 24 and 25's chat tests now set `server.llm`. The UI suite checks that the single chat's Settings has a Model field with the local id labelled, that its hint appears only when it is picked, and that the choice is remembered for the next chat; two older checks ("no model in the popover", "no hints in a pane") were updated for the one field and the one hidden hint this day adds.
 
-With llama.cpp installed (`brew install llama.cpp`) and a DeepSeek key: `uv run server.py` — the first start downloads Qwen3-8B (~5 GB) — then ⚙ Settings → Model → `local-qwen3-8b`, or a compare column with it.
+With llama.cpp installed (`brew install llama.cpp`) and a DeepSeek key: `uv run server.py` — the first start downloads Qwen3-8B Q8_0 (~8.7 GB) — then ⚙ Settings → Model → `local-qwen3-8b`, or a compare column with it.
 
 ## Day 25: a mini RAG chat with memory — the task state
 

@@ -75,7 +75,7 @@ class LocalLLMConfig:
     binary: str = "llama-server"
     host: str = "127.0.0.1"
     port: int = 8081
-    hf_repo: str = "Qwen/Qwen3-8B-GGUF:Q4_K_M"
+    hf_repo: str = "Qwen/Qwen3-8B-GGUF:Q8_0"
     model_path: str = ""
     context_size: int = 16384
     parallel: int = 2

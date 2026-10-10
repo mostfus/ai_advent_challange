@@ -5,7 +5,7 @@
   "binary": "llama-server",
   "host": "127.0.0.1",
   "port": 8081,
-  "hf_repo": "Qwen/Qwen3-8B-GGUF:Q4_K_M",
+  "hf_repo": "Qwen/Qwen3-8B-GGUF:Q8_0",
   "model_path": "",
   "context_size": 16384,
   "parallel": 2,
