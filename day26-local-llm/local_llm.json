@@ -1,0 +1,23 @@
+{
+  "enabled": true,
+  "model_id": "local-qwen3-8b",
+  "autostart": true,
+  "binary": "llama-server",
+  "host": "127.0.0.1",
+  "port": 8081,
+  "hf_repo": "Qwen/Qwen3-8B-GGUF:Q4_K_M",
+  "model_path": "",
+  "context_size": 16384,
+  "parallel": 2,
+  "gpu_layers": 99,
+  "flash_attn": "auto",
+  "sampling": {
+    "top_p": 0.8,
+    "top_k": 20,
+    "min_p": 0.0,
+    "repeat_penalty": 1.05
+  },
+  "extra_args": [],
+  "startup_timeout_seconds": 900,
+  "request_timeout_seconds": 600
+}
