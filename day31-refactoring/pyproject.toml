@@ -1,0 +1,12 @@
+[project]
+name = "day31-refactoring"
+version = "0.1.0"
+description = "An LLM agent with memory, invariants, a task state machine, MCP tools and RAG over a local code index, split into a headless core and a web UI."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "numpy>=2.2.6",
+    "python-dotenv==1.2.3",
+    "uvicorn[standard]>=0.52.4",
+]
