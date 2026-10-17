@@ -1,0 +1,63 @@
+{
+  "id": "legacy",
+  "view": "single",
+  "settings": {
+    "model": "deepseek-v4-flash",
+    "context_messages": 40,
+    "context_strategy": "facts",
+    "rag": false,
+    "rag_index": "fixed",
+    "rag_k": 5
+  },
+  "messages": [
+    {"role": "user", "content": "Plan a weekend trip", "ts": "2026-10-01T10:00:00.000+00:00"},
+    {"role": "assistant", "content": "Rome or Lisbon?", "ts": "2026-10-01T10:00:01.000+00:00",
+     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}},
+    {"role": "user", "content": "Rome", "ts": "2026-10-01T10:01:00.000+00:00"},
+    {"role": "assistant", "content": "Rome it is.", "ts": "2026-10-01T10:01:01.000+00:00",
+     "usage": {"prompt_tokens": 30, "completion_tokens": 5, "total_tokens": 35}}
+  ],
+  "created_at": "2026-10-01T10:00:00.000+00:00",
+  "updated_at": "2026-10-01T10:05:00.000+00:00",
+  "summary": {"text": "The trip is to Rome.", "covers": 2, "compressions": 1},
+  "facts": {"items": {"city": "Rome"}, "updates": 2, "usage_total": {"total_tokens": 20}},
+  "task_state": {"content": {"goal": "a trip to Rome", "focus": "", "clarified": [], "constraints": [], "terms": {}},
+                 "updates": 2},
+  "branches": [
+    {
+      "id": "branch-2", "name": "plan B", "parent": "main", "forked_at": 2,
+      "messages": [
+        {"role": "user", "content": "Lisbon", "ts": "2026-10-01T10:02:00.000+00:00"},
+        {"role": "assistant", "content": "Lisbon it is.", "ts": "2026-10-01T10:02:01.000+00:00",
+         "usage": {"prompt_tokens": 30, "completion_tokens": 6, "total_tokens": 36}}
+      ],
+      "facts": {"items": {"city": "Lisbon"}, "updates": 1, "usage_total": {"total_tokens": 9}},
+      "created_at": "2026-10-01T10:02:00.000+00:00"
+    },
+    {
+      "id": "branch-3", "name": "branch 3", "parent": "branch-2", "forked_at": 4,
+      "messages": [
+        {"role": "user", "content": "And the hotel?", "ts": "2026-10-01T10:03:00.000+00:00"},
+        {"role": "assistant", "content": "Near the river.", "ts": "2026-10-01T10:03:01.000+00:00",
+         "usage": {"prompt_tokens": 50, "completion_tokens": 4, "total_tokens": 54}}
+      ],
+      "facts": {"items": {"city": "Lisbon", "hotel": "by the river"}, "updates": 2,
+                "usage_total": {"total_tokens": 21}},
+      "summary": {"text": "The trip is to Lisbon.", "covers": 2, "compressions": 1},
+      "task_state": {"content": {"goal": "a trip to Lisbon", "focus": "the hotel", "clarified": [],
+                                 "constraints": [], "terms": {}},
+                     "updates": 3, "usage_total": {"total_tokens": 30}},
+      "created_at": "2026-10-01T10:03:00.000+00:00"
+    },
+    {
+      "id": "branch-4", "name": "abandoned", "parent": "main", "forked_at": 4,
+      "messages": [
+        {"role": "user", "content": "Never mind", "ts": "2026-10-01T10:04:00.000+00:00"},
+        {"role": "assistant", "content": "Fine.", "ts": "2026-10-01T10:04:01.000+00:00"}
+      ],
+      "created_at": "2026-10-01T10:04:00.000+00:00"
+    }
+  ],
+  "checkpoints": [{"id": "cp-1", "branch": "main", "index": 2, "label": "before the city"}],
+  "active_branch": "branch-3"
+}
