@@ -30,7 +30,7 @@ Tests: `uv run python -m unittest discover -s tests -v` and `npm install && npm 
 
 1. On the Mac that will run reviews: `brew install uv ollama`, `ollama pull bge-m3`.
 2. In the GitHub repository: register a self-hosted runner on that Mac with the label `ai-review` (Settings → Actions → Runners), add the secret `DEEPSEEK_API_KEY`, and require approval for workflows from external contributors.
-3. Add `.github/workflows/ai-review.yml` that runs `mostfus/ai_advent_challange/day32-ai-code-review@main` on `pull_request` - the file is in [docs/review.md](docs/review.md), with the inputs (`model`, `language`, `project-path`, ...). This repository has one at the root.
+3. Add `.github/workflows/ai-review.yml` that runs `mostfus/ai_advent_challange/day32-ai-code-review@<full commit SHA>` on `pull_request` (pinned: the code runs on your machine) - the file is in [docs/review.md](docs/review.md), with the inputs (`model`, `language`, `project-path`, ...). This repository has one at the root.
 4. Open a pull request: the review appears as comments on the code and an "AI review" summary comment.
 
 Without GitHub, `uv run python -m review --repo <repo> --base main --head HEAD` prints the review of a local range. What is sent and how much is in `review.json`.

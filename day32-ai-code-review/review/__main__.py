@@ -55,6 +55,8 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model", default="", help="overrides review.json")
     parser.add_argument("--language", default="", help="overrides review.json")
     parser.add_argument("--config", default=str(CONFIG_PATH))
+    parser.add_argument("--repo-config", default="",
+                        help="the repository's own review config, relative to --repo, laid over --config")
     parser.add_argument("--cache-dir", default=str(DEFAULT_CACHE), help="where the RAG index is kept")
     parser.add_argument("--no-rag", action="store_true", help="review without the project's excerpts")
     parser.add_argument("--dry-run", action="store_true", help="in Actions too: review, post nothing")
@@ -95,7 +97,12 @@ def write_step_summary(markdown: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = arguments(argv)
     repo = Path(args.repo).resolve()
-    config = ReviewConfig.load(args.config).for_model(args.model or None)
+    try:
+        config = ReviewConfig.load(args.config, repo / args.repo_config if args.repo_config else None)
+        config = config.for_model(args.model or None)
+    except (ValueError, OSError) as exc:
+        log(f"::error::AI review config: {exc}")
+        return 2
     if args.language:
         config = replace(config, language=args.language)
 

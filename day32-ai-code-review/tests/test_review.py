@@ -32,7 +32,7 @@ from review.config import ReviewConfig
 from review.context import plan
 from review.diff import parse, parse_patch, render
 from review.findings import Finding, fingerprints_in, inline_body, read_findings
-from review.github import GitHub, PullRequest
+from review.github import GitHub, GitHubError, PullRequest
 from review.knowledge import Knowledge, KnowledgeError, query_for
 from review.pipeline import Reviewer
 from review.publish import place, publish
@@ -186,8 +186,25 @@ class DiffTest(RepoTest):
         self.assertIn("unchanged lines", folded.text)
         self.assertNotIn(1, folded.shown)
         capped = render(loader, max_lines=3)
-        self.assertEqual(len(capped.shown), 3)
-        self.assertIn("more lines not shown", capped.text)
+        self.assertLessEqual(len(capped.shown), 4)          # one part keeps MIN_PART_LINES rows
+        self.assertIn("lines not shown (the file is too long)", capped.text)
+        self.assertTrue(loader.added_lines <= capped.shown)
+
+    def test_a_cap_keeps_every_part_of_the_change_in_view(self):
+        sh(self.repo, "checkout", "-q", self.head)
+        lines = [f"line_{i} = {i}" for i in range(300)]
+        (self.repo / "long.py").write_text("\n".join(lines) + "\n")
+        sh(self.repo, "add", "-A")
+        sh(self.repo, "commit", "-q", "-m", "long")
+        lines[10], lines[150], lines[290] = "first = 'changed'", "middle = 'changed'", "last = 'changed'"
+        (self.repo / "long.py").write_text("\n".join(lines) + "\n")
+        sh(self.repo, "commit", "-qam", "three changes")
+        [long] = parse(git.review_diff(self.repo, "HEAD~1", "HEAD"))
+        rendered = render(long, context=20, max_lines=30)
+        for text in ("first = 'changed'", "middle = 'changed'", "last = 'changed'"):
+            self.assertIn(text, rendered.text)
+        self.assertLessEqual(len(rendered.shown), 36)
+        self.assertGreater(rendered.truncated, 0)
 
     def test_a_github_patch_gives_the_commentable_lines(self):
         patch = "@@ -1,3 +1,4 @@ def f():\n a\n-b\n+c\n+d\n e\n\\ No newline at end of file"
@@ -424,12 +441,14 @@ class ReviewerTest(RepoTest):
 class FakeGitHub:
     """The REST API in memory: PR files, review comments, issue comments."""
 
-    def __init__(self, files, review_comments=(), issue_comments=(), refuse_review=False, refuse_lines=()):
+    def __init__(self, files, review_comments=(), issue_comments=(), refuse_review=False, refuse_lines=(),
+                 fail_comments_with=None):
         self.files = files
         self.review_comments = list(review_comments)
         self.issue_comments = list(issue_comments)
         self.refuse_review = refuse_review
         self.refuse_lines = set(refuse_lines)
+        self.fail_comments_with = fail_comments_with
         self.requests: list[tuple[str, str, dict | None]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -455,6 +474,8 @@ class FakeGitHub:
                 self.review_comments.append({**c, "review_id": 99, "html_url": f"https://c/{c['line']}"})
             return httpx.Response(200, json={"id": 99, "html_url": "https://review/99"})
         if request.method == "POST" and path.endswith("/pulls/7/comments"):
+            if self.fail_comments_with:
+                return httpx.Response(self.fail_comments_with, json={"message": "rate limit exceeded"})
             if body["line"] in self.refuse_lines:
                 return httpx.Response(422, json={"message": "line must be part of the diff"})
             return httpx.Response(201, json={"html_url": f"https://c/{body['line']}"})
@@ -544,6 +565,17 @@ class PublishTest(RepoTest):
         publish(self.gh(fake), PR, result, ReviewConfig(), log=QUIET)
         self.assertEqual([p for m, p, _ in fake.requests if m == "PATCH"], ["/repos/me/repo/issues/comments/5"])
 
+    def test_a_github_failure_in_the_fallback_fails_the_job_but_posts_the_summary(self):
+        result = a_result(self.repo, self.base, self.head, self.FINDINGS[:2])
+        fake = FakeGitHub(self.github_files(), refuse_review=True, fail_comments_with=429)
+        with self.assertRaisesRegex(GitHubError, "HTTP 429"):
+            publish(self.gh(fake), PR, result, ReviewConfig(), log=QUIET)
+        single = [r for r in fake.requests if r[0] == "POST" and r[1].endswith("/pulls/7/comments")]
+        self.assertEqual(len(single), 1)                   # the second is not tried
+        [(_, _, summary)] = [r for r in fake.requests if r[1].endswith("/issues/7/comments") and r[0] == "POST"]
+        self.assertIn("GitHub failed (429)", summary["body"])
+        self.assertNotIn("did not accept a comment on this line", summary["body"])
+
     def test_place_respects_the_limit_and_ranges(self):
         f1 = Finding("bug", "high", "a.py", 2, 4, "t", "c", line_text="x")
         f2 = Finding("bug", "low", "a.py", 9, None, "t2", "c", line_text="y")
@@ -580,6 +612,22 @@ class ConfigTest(unittest.TestCase):
             ReviewConfig.from_dict({"models": {"local": {"reasoning_effort": "maximum"}}})
         body = Reviewer(None, ReviewConfig(reasoning_effort="off")).body([])
         self.assertEqual(body["reasoning_effort"], "none")
+
+    def test_a_repository_config_is_laid_over_the_actions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base, mine = Path(tmp) / "review.json", Path(tmp) / "ai-review.json"
+            base.write_text(json.dumps({"batch_chars": 100, "language": "English",
+                                        "models": {"local": {"batch_chars": 10, "parallel": 1}}}))
+            mine.write_text(json.dumps({"language": "Russian", "skip": ["*.gen.py"],
+                                        "models": {"local": {"parallel": 2}}}))
+            config = ReviewConfig.load(base, mine)
+            self.assertEqual((config.batch_chars, config.language, config.skip), (100, "Russian", ["*.gen.py"]))
+            self.assertEqual(config.models["local"], {"batch_chars": 10, "parallel": 2})
+            with self.assertRaisesRegex(ValueError, "does not exist"):
+                ReviewConfig.load(base, Path(tmp) / "missing.json")
+            mine.write_text(json.dumps({"batch_chrs": 1}))
+            with self.assertRaisesRegex(ValueError, "review.json \\+ ai-review.json: unknown field"):
+                ReviewConfig.load(base, mine)
 
     def test_the_shipped_review_json_loads(self):
         config = ReviewConfig.load()

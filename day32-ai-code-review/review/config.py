@@ -1,8 +1,10 @@
 """`review.json` - how the reviewer reads a pull request and how much it sends.
 
 The same arrangement as `local_llm.json` and `corpus.json`: a file in the app
-folder, edited by hand. The action's inputs (`model`, `language`) override the
-two fields a repository is most likely to want its own value for.
+folder, edited by hand. A repository under review can have its own file (the
+action's `config` input): its fields are laid over this one's, and its
+`models` entries over this one's per model. The action's `model` and
+`language` inputs override both.
 
     model                 the model id: a DeepSeek model, or the local one from local_llm.json
     reasoning_effort      how long a DeepSeek model thinks: "medium" by default; "off" (= "none"),
@@ -63,12 +65,27 @@ class ReviewConfig:
     models: dict = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: Path | str = CONFIG_PATH) -> "ReviewConfig":
+    def load(cls, path: Path | str = CONFIG_PATH, overlay: Path | str | None = None) -> "ReviewConfig":
+        """`review.json` (no file: the defaults), with a repository's own file over it.
+
+        The overlay was asked for by name, so a missing one is an error, not the defaults.
+        """
         path = Path(path)
-        if not path.exists():
-            return cls()
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        return cls.from_dict(raw, path.name)
+        raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        where = path.name
+        if overlay is not None:
+            overlay = Path(overlay)
+            if not overlay.is_file():
+                raise ValueError(f"{overlay}: the review config file does not exist")
+            over = json.loads(overlay.read_text(encoding="utf-8"))
+            if not isinstance(over, dict):
+                raise ValueError(f"{overlay.name}: expected an object")
+            models = dict(raw.get("models") or {})
+            for name, fields_ in (over.get("models") or {}).items():
+                models[name] = {**(models.get(name) or {}), **fields_}
+            raw = {**raw, **over, "models": models}
+            where = f"{path.name} + {overlay.name}"
+        return cls.from_dict(raw, where)
 
     @classmethod
     def from_dict(cls, raw: dict, where: str = "review.json") -> "ReviewConfig":

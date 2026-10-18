@@ -255,7 +255,8 @@ def render(file: FileDiff, context: int | None = None, max_lines: int | None = N
     `context` - unchanged lines kept around each change; None keeps them all
     (the diff came with the whole file, so the model reads the file). Lines
     further from a change are folded into one `... N unchanged lines ...`.
-    `max_lines` - a cap on what is printed; the rest is counted, not shown.
+    `max_lines` - a cap on what is printed, shared out over every part of the
+    change (`spread`): each part loses lines, none disappears.
     A line longer than `MAX_LINE_CHARS` (minified code, data) is cut.
     """
     rows: list[tuple[str, Line | None, str]] = []
@@ -277,15 +278,11 @@ def render(file: FileDiff, context: int | None = None, max_lines: int | None = N
         if folded:
             rows.append(("fold", None, f"... {folded} unchanged lines ..."))
 
+    rows, truncated = spread(rows, max_lines)
     width = max([len(str(line.new)) for kind, line, _ in rows if line and line.new] + [3])
     out = [f"### {file.path} - {file.describe()}, +{file.added} -{file.removed}"]
     shown: set[int] = set()
-    printed = 0
-    truncated = 0
     for kind, line, text in rows:
-        if max_lines is not None and printed >= max_lines:
-            truncated += 1 if kind == "line" else 0
-            continue
         if kind == "line":
             number = str(line.new) if line.new is not None else ""
             mark = {"+": "+ ", "-": "- ", " ": "  "}[line.kind]
@@ -293,16 +290,65 @@ def render(file: FileDiff, context: int | None = None, max_lines: int | None = N
             out.append(f"{number:>{width}} | {mark}{text}")
             if line.new is not None:
                 shown.add(line.new)
-            printed += 1
         elif kind == "header":
             out.append(f"{'':>{width}} @@ {text}")
         elif kind == "fold":
             out.append(f"{'':>{width}} | {text}")
         elif kind == "gap":
             out.append(f"{'':>{width}} |")
-    if truncated:
-        out.append(f"{'':>{width}} | ... {truncated} more lines not shown (the file is too long) ...")
     return Rendered("\n".join(out), shown, truncated)
+
+
+#: However tight the cap, each part of the change keeps at least this many lines.
+MIN_PART_LINES = 4
+
+
+def spread(rows: list[tuple], max_lines: int | None) -> tuple[list[tuple], int]:
+    """Cut the printed lines to `max_lines`, every part of the change keeping its share.
+
+    A part is a run of lines between two folds or hunks - one change and its
+    context. Cutting from the end would hide the last changes entirely; here
+    each part keeps lines in proportion to its length (at least
+    `MIN_PART_LINES`) - the changed lines first, then the context nearest
+    them - and says where it left lines out.
+    """
+    total = sum(1 for kind, _, _ in rows if kind == "line")
+    if max_lines is None or total <= max_lines:
+        return rows, 0
+    parts: list[list[tuple]] = [[]]
+    for row in rows:
+        if row[0] == "line":
+            parts[-1].append(row)
+        else:
+            parts.append([row])
+            parts.append([])
+    out: list[tuple] = []
+    hidden = 0
+    for part in parts:
+        if not part or part[0][0] != "line":
+            out += part
+            continue
+        keep = max(MIN_PART_LINES, max_lines * len(part) // total)
+        if len(part) <= keep:
+            out += part
+            continue
+        # The lines closest to a change stay; the context furthest from one goes.
+        changed = [i for i, row in enumerate(part) if row[1].kind != CONTEXT] or [0]
+        distance = [min(abs(i - c) for c in changed) for i in range(len(part))]
+        kept = set(sorted(range(len(part)), key=lambda i: (distance[i], i))[:keep])
+        hidden += len(part) - keep
+        gap = 0
+        for i, row in enumerate(part):
+            if i in kept:
+                if gap:
+                    out.append(("fold", None, f"... {gap} lines not shown (the file is too long) ..."))
+                    gap = 0
+                out.append(row)
+            else:
+                gap += 1
+        if gap:
+            out.append(("fold", None, f"... {gap} lines not shown (the file is too long) ..."))
+    return out, hidden
 
 
 def keep_mask(lines: list[Line], context: int | None) -> list[bool]:

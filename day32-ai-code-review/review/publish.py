@@ -16,7 +16,9 @@ summary with a link to the comment it already has.
 
 **When GitHub refuses the review** (HTTP 422 - one of its lines is not in the
 diff after all), the comments are posted one by one, and the ones refused
-again go to the summary.
+again (422) go to the summary. Any other failure there - a token without the
+right, a rate limit, an outage - is not about a line: the comments left go to
+the summary, the summary is posted, and the job fails with GitHub's reason.
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ class Published:
     review_url: str | None = None
     summary_url: str | None = None
     summary: str = ""
+    #: A GitHub failure that is not about a line (token, rate limit, outage): the job must fail.
+    error: str | None = None
 
 
 def commentable(pr_files: list[dict]) -> dict[str, set[int]]:
@@ -128,18 +132,30 @@ def publish(gh: GitHub, pr: PullRequest, result: ReviewResult, config: ReviewCon
                 raise
             log(f"[review ] GitHub refused the review ({exc}) - posting the comments one by one")
             for f in chosen:
+                if out.error:
+                    f.inline = False
+                    f.note = "Not posted on the code: GitHub failed before this comment."
+                    continue
                 try:
                     comment = gh.create_review_comment(pr.number, pr.head_sha, payload(f))
                     f.url = comment.get("html_url")
                     out.inline += 1
                 except GitHubError as one:
                     f.inline = False
-                    f.note = f"GitHub did not accept a comment on this line ({one.status})."
-                    out.refused += 1
+                    if one.status == 422:
+                        f.note = "GitHub did not accept a comment on this line (422)."
+                        out.refused += 1
+                    else:
+                        # Not this line's fault: the rest would fail the same way. The
+                        # summary still goes up, and the job fails with the reason.
+                        out.error = str(one)
+                        f.note = f"Not posted on the code: GitHub failed ({one.status})."
     out.summary = summary_markdown(
         result, lambda path, line, end: gh.blob_url(pr.head_sha, path, line, end))
     comment = gh.upsert_comment(pr.number, SUMMARY_MARKER, out.summary)
     out.summary_url = (comment or {}).get("html_url")
     log(f"[review ] posted: {out.inline} comment(s) on the code, {out.repeated} already there, "
         f"{out.refused} refused; summary {out.summary_url}")
+    if out.error:
+        raise GitHubError(f"comments on the code were not posted: {out.error}")
     return out

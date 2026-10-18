@@ -81,7 +81,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: mostfus/ai_advent_challange/day32-ai-code-review@main
+      # A full commit SHA, not @main: this code runs on your machine with a write token,
+      # and a branch can move between two reviews. Take the SHA of the commit you trust.
+      - uses: mostfus/ai_advent_challange/day32-ai-code-review@<full commit SHA>
         with:
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           # language: Russian
@@ -98,6 +100,7 @@ This repository runs the same workflow from `.github/workflows/ai-review.yml`, w
 | `github-token` | `github.token` | The token the review is posted with |
 | `model` | `review.json`: `deepseek-v4-flash`, reasoning `medium` | A DeepSeek model id, or `local-qwen3-8b` (llama-server on the runner, from `local_llm.json`; no key needed). How long the model thinks is `reasoning_effort` in `review.json` |
 | `language` | `review.json` (English) | The language of the comments |
+| `config` | `""` | The repository's own review config, e.g. `.github/ai-review.json`: any fields of `review.json` (budgets, `skip`, `max_inline_comments`, `models`...), laid over the action's. A path that does not exist fails the job |
 | `project-path` | `.` | The folder RAG indexes; `auto` = the top-level folder most of the change is in |
 | `rag` | `true` | `false` reviews without excerpts (no Ollama needed) |
 | `cache-dir` | `~/.cache/ai-review` | The index and its embedding cache, one folder per repository |
@@ -106,7 +109,7 @@ This repository runs the same workflow from `.github/workflows/ai-review.yml`, w
 
 - **Nothing from the repository is executed.** The reviewer reads the checkout with `git` and from the files; the model's output is text that is posted, never run.
 - **Forks.** A self-hosted runner on a public repository is somebody's computer that a stranger's pull request could run a job on - including a pull request that edits the workflow file itself. The workflow's `if:` skips pull requests from forks, and the reviewer refuses them too; the approval setting in step 5 is what stops a fork's edited workflow from running at all.
-- **Whose reviewer runs.** A repository that uses `mostfus/ai_advent_challange/day32-ai-code-review@main` runs that code. This repository runs the reviewer from the PR's own checkout, so a branch can change the reviewer - which only somebody who can push to the repository can do, and they could change the workflow anyway.
+- **Whose reviewer runs.** A repository that uses `mostfus/ai_advent_challange/day32-ai-code-review@<sha>` runs that commit's code - pin a full SHA (as GitHub advises for third-party actions), not `@main`, which can change between two reviews. This repository runs the reviewer from the PR's own checkout, so a branch can change the reviewer - which only somebody who can push to the repository can do, and they could change the workflow anyway.
 - **What leaves the machine**: the diff, the changed files and the excerpts go to the model's provider (DeepSeek, unless the model is the local one). Files a repository keeps out of git never get there: the index reads only what `git ls-files` lists.
 
 ## Trying it without GitHub

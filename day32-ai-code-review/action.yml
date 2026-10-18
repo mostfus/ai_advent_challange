@@ -22,6 +22,10 @@ inputs:
     description: The language of the comments. Empty = review.json (English).
     required: false
     default: ""
+  config:
+    description: The repository's own review config (JSON, the fields of review.json), relative to the repository - laid over the action's review.json. Empty = the action's only.
+    required: false
+    default: ""
   project-path:
     description: The folder RAG indexes, relative to the repository. `auto` = the top-level folder most of the change is in.
     required: false
@@ -55,6 +59,7 @@ runs:
         REVIEW_MODEL: ${{ inputs.model }}
         REVIEW_LANGUAGE: ${{ inputs.language }}
         REVIEW_PROJECT: ${{ inputs.project-path }}
+        REVIEW_CONFIG: ${{ inputs.config }}
         REVIEW_RAG: ${{ inputs.rag }}
         REVIEW_CACHE: ${{ inputs.cache-dir }}
         PYTHONUNBUFFERED: "1"
@@ -67,5 +72,6 @@ runs:
         if [ -n "$REVIEW_MODEL" ]; then args+=(--model "$REVIEW_MODEL"); fi
         if [ -n "$REVIEW_LANGUAGE" ]; then args+=(--language "$REVIEW_LANGUAGE"); fi
         if [ -n "$REVIEW_CACHE" ]; then args+=(--cache-dir "$REVIEW_CACHE"); fi
+        if [ -n "$REVIEW_CONFIG" ]; then args+=(--repo-config "$REVIEW_CONFIG"); fi
         if [ "$REVIEW_RAG" = "false" ]; then args+=(--no-rag); fi
         uv run --frozen --quiet python -m review "${args[@]}"
