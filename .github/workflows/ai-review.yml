@@ -1,0 +1,37 @@
+# AI review of every pull request in this repository (day 32).
+#
+# Runs on a self-hosted runner with the label `ai-review` (a Mac with Ollama and
+# bge-m3 - see day32-ai-code-review/docs/review.md) and uses the reviewer from
+# the pull request's own checkout. `project-path: auto` indexes the day folder the
+# pull request changes, not the whole repository of snapshots.
+name: AI review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Code from forks never reaches the self-hosted runner.
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    runs-on: [self-hosted, ai-review]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./day32-ai-code-review
+        with:
+          deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          project-path: auto

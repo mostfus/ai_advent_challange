@@ -1,0 +1,26 @@
+{
+  "max_result_chars": 8000,
+  "servers": [
+    {
+      "id": "git",
+      "label": "Git",
+      "purpose": "The project's git repository: the current branch, uncommitted changes, diffs, the log, one commit.",
+      "command": ["uvx", "mcp-server-git", "--repository", "{git_root}"],
+      "needs_git": true,
+      "tools": ["git_status", "git_branch", "git_log", "git_diff_unstaged", "git_diff_staged", "git_diff", "git_show"],
+      "fixed": {"repo_path": "{git_root}"}
+    },
+    {
+      "id": "files",
+      "label": "Files",
+      "purpose": "The project folder: list folders, the file tree, read a text file, search file names.",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "{project}"],
+      "tools": ["list_directory", "directory_tree", "read_text_file", "search_files", "get_file_info"],
+      "defaults": {
+        "directory_tree": {"excludePatterns": [".git", "node_modules", ".venv", "__pycache__", "data", ".build", ".swiftpm", "DerivedData", "Pods", "Carthage", "*.xcassets"]},
+        "search_files": {"excludePatterns": [".git", "node_modules", ".venv", "__pycache__", ".build", "DerivedData", "Pods"]}
+      },
+      "deny": [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.p8", "*.mobileprovision", "id_rsa*", "id_ed25519*", ".netrc", "credentials*", "secrets*"]
+    }
+  ]
+}
