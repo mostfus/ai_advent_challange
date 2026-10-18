@@ -1,0 +1,43 @@
+{
+  "max_tool_rounds": 30,
+  "max_tool_calls": 80,
+  "instructions": ["AGENTS.md", "CLAUDE.md"],
+  "max_instructions_chars": 8000,
+  "files": {
+    "max_result_chars": 12000,
+    "read_lines": 400,
+    "max_read_lines": 2000,
+    "max_file_bytes": 1000000,
+    "search_results": 100,
+    "max_listed": 400,
+    "exclude": [".git", "node_modules", ".venv", "venv", "__pycache__", ".build", ".swiftpm", "DerivedData", "Pods", "Carthage", "dist", "build", ".idea", ".gradle"],
+    "deny": [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.p8", "*.mobileprovision", "id_rsa*", "id_ed25519*", ".netrc", "credentials*", "secrets*"]
+  },
+  "scenarios": [
+    {
+      "id": "usages",
+      "label": "Find usages",
+      "prompt": "Find every place in the project where {name} is used. Group them by file, give each one as `path:line` with what it is used for there, and say where it is defined. Do not change any files."
+    },
+    {
+      "id": "docs",
+      "label": "Update docs",
+      "prompt": "Update the documentation to match the code changes: look at the uncommitted changes and the last commits with git, find the README and docs sections they make outdated, and edit them. Then list what you changed and why."
+    },
+    {
+      "id": "changelog",
+      "label": "Generate CHANGELOG",
+      "prompt": "Write CHANGELOG.md for this project from its git history: newest first, grouped by date or version into Added / Changed / Fixed, one line per change in plain words. If CHANGELOG.md already exists, add what is missing instead of rewriting it."
+    },
+    {
+      "id": "adr",
+      "label": "Write an ADR",
+      "prompt": "Write an architecture decision record for {decision}: read the code and docs it concerns, then create docs/adr/NNNN-<short-title>.md (the next free number) with Context, Decision, Consequences and Alternatives considered."
+    },
+    {
+      "id": "rules",
+      "label": "Check the rules",
+      "prompt": "Check the project against its rules (the project's instructions file, or its contributing or style guide). For every rule say whether it holds, and list each violation as `path:line` with the rule it breaks. Do not fix anything yet."
+    }
+  ]
+}

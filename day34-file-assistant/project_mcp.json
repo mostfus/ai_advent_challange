@@ -1,0 +1,14 @@
+{
+  "max_result_chars": 8000,
+  "servers": [
+    {
+      "id": "git",
+      "label": "Git",
+      "purpose": "The project's git repository: the current branch, uncommitted changes, diffs, the log, one commit.",
+      "command": ["uvx", "mcp-server-git", "--repository", "{git_root}"],
+      "needs_git": true,
+      "tools": ["git_status", "git_branch", "git_log", "git_diff_unstaged", "git_diff_staged", "git_diff", "git_show"],
+      "fixed": {"repo_path": "{git_root}"}
+    }
+  ]
+}

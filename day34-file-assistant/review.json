@@ -1,0 +1,33 @@
+{
+  "model": "deepseek-v4-flash",
+  "reasoning_effort": "medium",
+  "temperature": 0.2,
+  "language": "English",
+  "detect_copies": true,
+  "whole_file_lines": 400,
+  "context_lines": 8,
+  "max_file_lines": 900,
+  "batch_chars": 60000,
+  "max_batches": 6,
+  "parallel": 3,
+  "excerpts_per_file": 4,
+  "excerpts_max": 8,
+  "excerpt_chars": 14000,
+  "max_inline_comments": 20,
+  "skip": ["*.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Package.resolved",
+           "*.pbxproj", "*.xcscheme", "*.storyboard", "*.xib", "*.min.js", "*.min.css",
+           "*.map", "*.svg", "*.snap"],
+  "models": {
+    "local-qwen3-8b": {
+      "reasoning_effort": "off",
+      "whole_file_lines": 150,
+      "context_lines": 5,
+      "max_file_lines": 300,
+      "batch_chars": 16000,
+      "parallel": 1,
+      "excerpts_per_file": 2,
+      "excerpts_max": 3,
+      "excerpt_chars": 4000
+    }
+  }
+}
