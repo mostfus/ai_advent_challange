@@ -1,0 +1,12 @@
+[project]
+name = "day32-ai-code-review"
+version = "0.1.0"
+description = "A developer assistant over a headless agent core, with an AI code reviewer for GitHub pull requests (diff + RAG over docs and code, inline comments)."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "numpy>=2.2.6",
+    "python-dotenv==1.2.3",
+    "uvicorn[standard]>=0.52.4",
+]

@@ -1,0 +1,11 @@
+{
+  "name": "day34-file-assistant",
+  "private": true,
+  "description": "Headless jsdom checks for the agent's web UI.",
+  "scripts": {
+    "test": "node tests/ui-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0"
+  }
+}
