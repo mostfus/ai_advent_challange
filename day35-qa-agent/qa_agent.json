@@ -1,0 +1,24 @@
+{
+  "model": "deepseek-v4-flash",
+  "reasoning_effort": "low",
+  "temperature": 0.2,
+  "device": "iPhone 17",
+  "bridge_port": 22087,
+  "show_simulator": true,
+  "max_actions": 40,
+  "max_tool_rounds": 70,
+  "max_tool_calls": 90,
+  "settle_seconds": 0.4,
+  "max_screen_chars": 6000,
+  "diagnose": true,
+  "diagnosis_tool_rounds": 16,
+  "diagnosis_tool_calls": 30,
+  "build_timeout_seconds": 1200,
+  "bridge_start_seconds": 180,
+  "models": {
+    "local-qwen3-8b": {
+      "reasoning_effort": "off",
+      "max_screen_chars": 3500
+    }
+  }
+}

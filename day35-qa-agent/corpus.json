@@ -1,0 +1,8 @@
+{
+  "include": ["**/*.md", "**/*.markdown", "**/*.swift", "**/*.py", "docs/**/*.txt",
+              "**/*.yaml", "**/*.yml", "**/*.graphql", "**/*.proto", "**/*.sql"],
+  "exclude": [".git", ".venv", "venv", "node_modules", "__pycache__", "data", ".build",
+              ".swiftpm", "DerivedData", "Pods", "Carthage", "*.xcodeproj", "*.xcworkspace",
+              "*.xcassets", "fixtures"],
+  "max_file_kb": 256
+}

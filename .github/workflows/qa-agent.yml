@@ -1,0 +1,69 @@
+# The QA agent (day 35): the QA suite in day35-qa-agent/qa_suite run on the iOS app
+# it is written for - mostfus/UIKitDeepCollectionView - on the self-hosted Mac runner.
+#
+# The app is built for the Simulator from its own repository, every scenario is
+# carried out by the model (a failure traced into the app's code), the XCUITests
+# generated from passed runs are run without a model, and the result is posted
+# to the pull request; the screenshots are the job's artifact.
+name: QA agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "day35-qa-agent/**"
+      - ".github/workflows/qa-agent.yml"
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Only this scenario id (empty - the whole suite)
+        required: false
+        default: ""
+      model:
+        description: Model id (empty - qa_agent.json)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # One simulator, one bridge port: one QA job at a time on the runner.
+  group: qa-agent
+  cancel-in-progress: false
+
+jobs:
+  qa:
+    # Code from forks never reaches the self-hosted runner.
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Check out the app under test
+        uses: actions/checkout@v5
+        with:
+          repository: mostfus/UIKitDeepCollectionView
+          path: qa-app
+          persist-credentials: false
+
+      - id: qa
+        uses: ./day35-qa-agent/qa-action
+        with:
+          project-path: qa-app
+          deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          scenario: ${{ inputs.scenario }}
+          model: ${{ inputs.model }}
+
+      - name: Keep the reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-report
+          path: ${{ runner.temp }}/qa-report/runs
+          if-no-files-found: ignore

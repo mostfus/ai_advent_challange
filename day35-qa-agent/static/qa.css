@@ -1,0 +1,153 @@
+/* Day 35: the QA tab. Uses the page's colour tokens and the Project tab's
+   cards, rows and chips (indexing.css); adds the run's timeline. */
+
+#qa-view {
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.qa-page {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 16px 60px;
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.qa-head { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.qa-head h2 { margin: 0; font-size: 20px; }
+
+.qa-side, .qa-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+@media (max-width: 900px) {
+  .qa-page { grid-template-columns: minmax(0, 1fr); }
+}
+
+.qa-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.qa-field > span { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.qa-field select, .qa-field input, .qa-field textarea { font-size: 13px; }
+.qa-field textarea { min-height: 120px; resize: vertical; line-height: 1.45; }
+.qa-inline { display: flex; gap: 6px; align-items: center; }
+.qa-inline > select { flex: 1; min-width: 0; }
+.qa-inline .ghost-btn, .qa-inline .primary-btn { white-space: nowrap; padding: 6px 10px; font-size: 12px; }
+.qa-sub { border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 10px; }
+.qa-check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 2px 0 10px; }
+
+.qa-list { display: flex; flex-direction: column; gap: 6px; }
+.qa-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--input-bg);
+}
+.qa-item.current { border-color: var(--accent); }
+.qa-item-title { font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.qa-item-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.qa-item-actions button { font-size: 11.5px; padding: 3px 8px; }
+.qa-run-row { cursor: pointer; flex-direction: row; align-items: center; gap: 8px; }
+.qa-run-row:hover { border-color: var(--accent); }
+.qa-run-row .qa-grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+
+.qa-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.qa-verdict.good { color: var(--ix-good); background: var(--ix-good-bg); border-color: transparent; }
+.qa-verdict.bad { color: var(--ix-bad); background: var(--ix-bad-bg); border-color: transparent; }
+.qa-verdict.warn { color: var(--ix-warn); background: var(--ix-warn-bg); border-color: transparent; }
+.qa-verdict.big { font-size: 15px; padding: 5px 14px; }
+
+.qa-run-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.qa-run-head h3 { margin: 0; font-size: 16px; }
+.qa-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.qa-scenario { white-space: pre-wrap; font-size: 13px; background: var(--bg); border-radius: 8px; padding: 8px 10px; margin: 10px 0; }
+.qa-answer { font-size: 14px; line-height: 1.5; margin: 8px 0; }
+.qa-section-title { font-size: 13px; font-weight: 700; margin: 14px 0 6px; }
+
+.qa-checks { display: flex; flex-direction: column; gap: 6px; }
+.qa-check-row { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+.qa-check-mark { font-weight: 800; width: 18px; flex: none; }
+.qa-check-mark.good { color: var(--ix-good); }
+.qa-check-mark.bad { color: var(--ix-bad); }
+
+.qa-crash, .qa-diagnosis {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.qa-crash { background: var(--ix-bad-bg); color: var(--text); }
+.qa-crash pre { white-space: pre-wrap; font-size: 11.5px; margin: 6px 0 0; }
+.qa-diagnosis { background: var(--bg); border: 1px solid var(--border); }
+
+.qa-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+.qa-step {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--input-bg);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.qa-step.err { border-color: var(--ix-bad); }
+.qa-step img { width: 100%; display: block; background: var(--bg); cursor: zoom-in; aspect-ratio: 9 / 19.5; object-fit: cover; object-position: top; }
+.qa-step-body { padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.qa-step-act { font-weight: 700; font-size: 12.5px; word-break: break-word; }
+.qa-step-why { color: var(--text-muted); }
+.qa-step-flag { font-size: 11px; color: var(--ix-warn); }
+.qa-step-err { font-size: 11px; color: var(--ix-bad); word-break: break-word; }
+.qa-step details summary { cursor: pointer; font-size: 11px; color: var(--text-muted); }
+.qa-step pre, .qa-code {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: var(--ix-code-bg);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0 0;
+  max-height: 340px;
+  overflow: auto;
+}
+.qa-code { font-size: 11.5px; max-height: 480px; }
+
+.qa-job { font-size: 12px; }
+.qa-job pre { white-space: pre-wrap; max-height: 180px; overflow: auto; font-size: 11px; margin: 6px 0 0;
+  background: var(--ix-code-bg); border-radius: 6px; padding: 6px 8px; }
+.qa-empty { color: var(--text-muted); font-size: 13px; padding: 30px 10px; text-align: center; }
+
+.qa-tests { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+.qa-tests th, .qa-tests td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+
+.qa-zoom {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  cursor: zoom-out;
+  padding: 20px;
+}
+.qa-zoom img { max-height: 100%; max-width: 100%; border-radius: 18px; }
+
+#qa-view .ghost-btn:disabled { opacity: 0.45; cursor: default; }
+#qa-view .ghost-btn:disabled:hover { border-color: var(--border); }

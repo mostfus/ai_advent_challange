@@ -1,0 +1,59 @@
+# The QA agent's bridge into the iOS Simulator (day 35), as an XcodeGen spec.
+#
+# `qa/bridge.py` runs `xcodegen generate` on this file before a build, so the
+# generated QABridge.xcodeproj (git-ignored) is never edited or committed. The
+# suite's tests folder comes from QA_TESTS_DIR - this app's `qa_suite/tests`, or
+# another repository's suite in CI. Two targets:
+#
+#   QABridgeHost     an empty app - a UI-testing bundle needs a target app, even
+#                    though every test here drives another app by bundle id
+#   QABridgeUITests  BridgeTests.testServe (the HTTP bridge the agent talks to),
+#                    the helpers the generated tests call, and the generated
+#                    scenario tests themselves (${QA_TESTS_DIR})
+#
+# Simulator only: everything is signed ad hoc ("Sign to Run Locally").
+name: QABridge
+options:
+  bundleIdPrefix: dev.aiadvent.qa
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  QABridgeHost:
+    type: application
+    platform: iOS
+    sources: [Host]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.aiadvent.qa.host
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+  QABridgeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+      - path: ${QA_TESTS_DIR}
+        optional: true
+    dependencies:
+      - target: QABridgeHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.aiadvent.qa.uitests
+        TEST_TARGET_NAME: QABridgeHost
+schemes:
+  QABridge:
+    build:
+      targets:
+        QABridgeHost: all
+        QABridgeUITests: [test]
+    test:
+      targets: [QABridgeUITests]
