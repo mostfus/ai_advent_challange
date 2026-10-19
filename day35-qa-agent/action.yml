@@ -1,0 +1,77 @@
+name: AI code review
+description: >-
+  Reviews a pull request with an LLM: the diff and the changed files, RAG over the project's
+  documentation and code, then potential bugs, architecture problems and recommendations -
+  as comments on the code and one summary comment. Meant for a self-hosted runner with
+  Ollama (bge-m3) on it; see docs/review.md.
+
+inputs:
+  deepseek-api-key:
+    description: DeepSeek API key - pass a repository secret. Empty uses DEEPSEEK_API_KEY from the runner's environment; not needed for the local model.
+    required: false
+    default: ""
+  github-token:
+    description: The token the review is posted with (needs pull-requests write).
+    required: false
+    default: ${{ github.token }}
+  model:
+    description: The model id - a DeepSeek model, or `local-qwen3-8b` (llama.cpp on the runner). Empty = review.json.
+    required: false
+    default: ""
+  language:
+    description: The language of the comments. Empty = review.json (English).
+    required: false
+    default: ""
+  config:
+    description: The repository's own review config (JSON, the fields of review.json), relative to the repository - laid over the action's review.json. Empty = the action's only.
+    required: false
+    default: ""
+  project-path:
+    description: The folder RAG indexes, relative to the repository. `auto` = the top-level folder most of the change is in.
+    required: false
+    default: "."
+  rag:
+    description: "`false` reviews without the project's excerpts (no Ollama needed)."
+    required: false
+    default: "true"
+  cache-dir:
+    description: Where the RAG index and its embedding cache are kept between runs. Empty = ~/.cache/ai-review.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Put Homebrew on the PATH
+      shell: bash
+      run: |
+        # A runner started as a service does not read the login shell's PATH.
+        for dir in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+          if [ -d "$dir" ]; then echo "$dir" >> "$GITHUB_PATH"; fi
+        done
+
+    - name: Review the pull request
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        REVIEW_DEEPSEEK_KEY: ${{ inputs.deepseek-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_LANGUAGE: ${{ inputs.language }}
+        REVIEW_PROJECT: ${{ inputs.project-path }}
+        REVIEW_CONFIG: ${{ inputs.config }}
+        REVIEW_RAG: ${{ inputs.rag }}
+        REVIEW_CACHE: ${{ inputs.cache-dir }}
+        PYTHONUNBUFFERED: "1"
+      run: |
+        if ! command -v uv >/dev/null; then
+          echo "::error::uv is not installed on this runner (brew install uv)"; exit 1
+        fi
+        if [ -n "$REVIEW_DEEPSEEK_KEY" ]; then export DEEPSEEK_API_KEY="$REVIEW_DEEPSEEK_KEY"; fi
+        args=(--repo "$GITHUB_WORKSPACE" --project "${REVIEW_PROJECT:-.}")
+        if [ -n "$REVIEW_MODEL" ]; then args+=(--model "$REVIEW_MODEL"); fi
+        if [ -n "$REVIEW_LANGUAGE" ]; then args+=(--language "$REVIEW_LANGUAGE"); fi
+        if [ -n "$REVIEW_CACHE" ]; then args+=(--cache-dir "$REVIEW_CACHE"); fi
+        if [ -n "$REVIEW_CONFIG" ]; then args+=(--repo-config "$REVIEW_CONFIG"); fi
+        if [ "$REVIEW_RAG" = "false" ]; then args+=(--no-rag); fi
+        uv run --frozen --quiet python -m review "${args[@]}"

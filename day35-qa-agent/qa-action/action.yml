@@ -1,0 +1,99 @@
+name: AI QA agent for an iOS app
+description: >-
+  Builds an iOS app for the Simulator, has an LLM carry out the QA suite's scenarios on it
+  (steps, checks, screenshots, a crash report, the cause of a failure traced in the code),
+  then runs the XCUITests generated from passed runs. Posts a summary to the pull request.
+  Needs a self-hosted Mac runner with Xcode, xcodegen and uv; see docs/qa.md.
+
+inputs:
+  project-path:
+    description: The app's checkout, relative to the workspace (or absolute).
+    required: true
+  suite:
+    description: The QA suite (suite.json), relative to the workspace. Empty = the suite next to this action.
+    required: false
+    default: ""
+  container:
+    description: The .xcodeproj or .xcworkspace in the checkout. Empty = the suite's `app.project`.
+    required: false
+    default: ""
+  scheme:
+    description: The scheme to build. Empty = the suite's `app.scheme`.
+    required: false
+    default: ""
+  device:
+    description: Simulator name or UDID. Empty = the suite's, then qa_agent.json's.
+    required: false
+    default: ""
+  model:
+    description: The model id. Empty = qa_agent.json.
+    required: false
+    default: ""
+  scenario:
+    description: Only this scenario id. Empty = every scenario of the suite.
+    required: false
+    default: ""
+  deepseek-api-key:
+    description: DeepSeek API key - pass a repository secret.
+    required: false
+    default: ""
+  github-token:
+    description: The token the summary comment is posted with (needs pull-requests write).
+    required: false
+    default: ${{ github.token }}
+  out:
+    description: Where the reports and screenshots are written. Empty = $RUNNER_TEMP/qa-report.
+    required: false
+    default: ""
+
+outputs:
+  report-dir:
+    description: The folder with summary.md and every run's report and screenshots.
+    value: ${{ steps.qa.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Put Homebrew on the PATH
+      shell: bash
+      run: |
+        for dir in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+          if [ -d "$dir" ]; then echo "$dir" >> "$GITHUB_PATH"; fi
+        done
+
+    - name: Run the QA suite
+      id: qa
+      shell: bash
+      working-directory: ${{ github.action_path }}/..
+      env:
+        QA_DEEPSEEK_KEY: ${{ inputs.deepseek-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        QA_PROJECT: ${{ inputs.project-path }}
+        QA_SUITE: ${{ inputs.suite }}
+        QA_CONTAINER: ${{ inputs.container }}
+        QA_SCHEME: ${{ inputs.scheme }}
+        QA_DEVICE: ${{ inputs.device }}
+        QA_MODEL: ${{ inputs.model }}
+        QA_SCENARIO: ${{ inputs.scenario }}
+        QA_OUT: ${{ inputs.out }}
+        LOCAL_LLM_AUTOSTART: "0"
+        PROJECT_MCP_AUTOSTART: "0"
+        PYTHONUNBUFFERED: "1"
+      run: |
+        for tool in uv xcodegen xcodebuild; do
+          if ! command -v "$tool" >/dev/null; then
+            echo "::error::$tool is not installed on this runner"; exit 2
+          fi
+        done
+        if [ -n "$QA_DEEPSEEK_KEY" ]; then export DEEPSEEK_API_KEY="$QA_DEEPSEEK_KEY"; fi
+        case "$QA_PROJECT" in /*) project="$QA_PROJECT" ;; *) project="$GITHUB_WORKSPACE/$QA_PROJECT" ;; esac
+        out="${QA_OUT:-$RUNNER_TEMP/qa-report}"
+        echo "report-dir=$out" >> "$GITHUB_OUTPUT"
+        args=(--project "$project" --out "$out")
+        if [ -n "$QA_SUITE" ]; then args+=(--suite "$GITHUB_WORKSPACE/$QA_SUITE"); fi
+        if [ -n "$QA_CONTAINER" ]; then args+=(--container "$QA_CONTAINER"); fi
+        if [ -n "$QA_SCHEME" ]; then args+=(--scheme "$QA_SCHEME"); fi
+        if [ -n "$QA_DEVICE" ]; then args+=(--device "$QA_DEVICE"); fi
+        if [ -n "$QA_MODEL" ]; then args+=(--model "$QA_MODEL"); fi
+        if [ -n "$QA_SCENARIO" ]; then args+=(--scenario "$QA_SCENARIO"); fi
+        uv run --frozen --quiet python -m qa "${args[@]}"

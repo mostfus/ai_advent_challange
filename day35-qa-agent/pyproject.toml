@@ -1,0 +1,12 @@
+[project]
+name = "day35-qa-agent"
+version = "0.1.0"
+description = "A developer assistant over a headless agent core: agentic code, an AI reviewer for pull requests, and an AI QA agent that runs test scenarios on an iOS app in the Simulator."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "numpy>=2.2.6",
+    "python-dotenv==1.2.3",
+    "uvicorn[standard]>=0.52.4",
+]
